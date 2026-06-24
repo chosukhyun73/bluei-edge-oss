@@ -1,0 +1,27 @@
+@import 'tailwindcss';
+@import './theme.css';
+
+/* Tauri WebKit / GTK 에서 native <select>·<option> 이 OS light theme 으로 강제
+   fallback 되어 흰 배경 + 흰 글자로 보이는 문제. color-scheme: dark 로 WebKit
+   에게 dark theme 임을 알려서 native control 도 dark 로 렌더. */
+html {
+  color-scheme: dark;
+}
+
+/* native select 의 dropdown option 도 dark 로 강제 (Linux WebKit). */
+option {
+  background-color: #111827;
+  color: #f9fafb;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}

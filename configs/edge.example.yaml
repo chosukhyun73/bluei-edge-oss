@@ -1,0 +1,560 @@
+site:
+  site_id: site_dev_001
+  name: Bluei Dev Site
+  timezone: Asia/Seoul
+  # 아래는 페어링 QR(/v1/pair)이 앱에 전달 → 어장 자동구성에 사용:
+  site_type: land_based_ras   # land_based_ras|hatchery|flow_through|pond|tank
+  operator: ""                # 사업자/운영자명
+  lat: 0.0                    # 위도(선택)
+  lng: 0.0                    # 경도(선택)
+
+edge:
+  edge_id: edge_dev_001
+  mode: development
+  data_dir: ./var/bluei-edge
+
+runtime:
+  startup_timeout_sec: 30
+  shutdown_timeout_sec: 10
+  clock_skew_warning_sec: 300
+
+api:
+  bind_host: 0.0.0.0
+  port: 8080
+  request_timeout_sec: 30
+  auth:
+    enabled: true
+    operator_token_env: BLUEI_EDGE_OPERATOR_TOKEN
+
+storage:
+  driver: sqlite
+  sqlite_path: ./var/bluei-edge/edge.db
+  migration_mode: auto
+
+# 고용량 telemetry 보관기간. 만료 이벤트는 월별 백업 파일
+# (archive/events-YYYY-MM.jsonl.gz)로 export 된 뒤 live DB 에서 제거된다.
+# 백업 파일은 자동 삭제하지 않는다 — 저장/삭제는 운영자가 직접 관리한다.
+# rules 에 없는 event_type(운영·감사)은 무기한 보존된다.
+retention:
+  enabled: true
+  interval_sec: 86400        # 하루 1회 점검
+  initial_delay_sec: 120
+  archive_dir: ""            # 빈 값이면 sqlite 경로 디렉터리/archive 사용
+  rules:
+    # 센서 측정값: 최근 24~48h raw 보존(차트용), 그 이전은 일별 min/max/avg 요약만 남기고 raw 삭제.
+    - event_type: sensor.reading.recorded
+      keep_days: 1
+      aggregate_daily: true
+    # 장비 헬스: 24시간 지나면 삭제 (요약 없음).
+    - event_type: device.health.updated
+      keep_days: 1
+
+tanks:
+  config_path: ./configs/tanks.example.yaml
+
+groups:
+  config_path: ./configs/groups.example.yaml
+
+devices:
+  config_path: ./configs/devices.example.yaml
+
+# ── Multi-tank Phase 1 domain (added 2026-05-16, see docs/39, docs/40) ──
+farms:
+  config_path: ./configs/farms.example.yaml
+
+sites_land:
+  config_path: ./configs/sites_land.example.yaml
+
+sites_marine:
+  config_path: ./configs/sites_marine.example.yaml
+
+water_treatment_groups:
+  config_path: ./configs/water_treatment_groups.example.yaml
+
+actuators:
+  config_path: ./configs/actuators.example.yaml
+
+sensors:
+  config_path: ./configs/sensors.example.yaml
+
+controllers:
+  config_path: ./configs/controllers.example.yaml
+
+species_profiles:
+  config_path: ./configs/species_profiles.example.yaml
+
+cameras:
+  config_path: ./configs/cameras.example.yaml
+
+logging:
+  config_path: ./configs/logging.example.yaml
+
+collector:
+  enabled: true
+  adapters:
+    - id: mock-water-01
+      type: mock_sensor
+      interval_sec: 10
+      metrics:
+        - sensor_id: sensor_watertemp_tank_01
+          device_id: mock_probe_01
+          metric: water_temperature
+          unit: celsius
+          value: 18.5
+        - sensor_id: sensor_do_tank_01
+          device_id: mock_probe_01
+          metric: dissolved_oxygen
+          unit: mg/L
+          value: 6.7
+        - sensor_id: sensor_ph_tank_01
+          device_id: mock_probe_01
+          metric: ph
+          unit: ph
+          value: 7.4
+        - sensor_id: sensor_salinity_tank_01
+          device_id: mock_probe_01
+          metric: salinity
+          unit: ppt
+          value: 31.0
+        - sensor_id: sensor_no2_tank_01
+          device_id: mock_probe_01
+          metric: nitrite
+          unit: mg/L
+          value: 0.02
+        - sensor_id: sensor_no3_tank_01
+          device_id: mock_probe_01
+          metric: nitrate
+          unit: mg/L
+          value: 12.0
+        - sensor_id: sensor_co2_tank_01
+          device_id: mock_probe_01
+          metric: carbon_dioxide
+          unit: mg/L
+          value: 8.0
+        - sensor_id: sensor_tts_tank_01
+          device_id: mock_probe_01
+          metric: total_suspended_solids
+          unit: mg/L
+          value: 15.0
+        - sensor_id: sensor_nh3_tank_01
+          device_id: mock_probe_01
+          metric: unionized_ammonia
+          unit: mg/L
+          value: 0.01
+        - sensor_id: sensor_flow_rate_tank_01
+          device_id: pump_01
+          metric: flow_rate
+          unit: L/min
+          value: 120.0
+        - sensor_id: sensor_pump_pressure_tank_01
+          device_id: pump_01
+          metric: pump_pressure
+          unit: kPa
+          value: 42.0
+        - sensor_id: sensor_light_intensity_tank_01
+          device_id: photoperiod_light_01
+          metric: light_intensity
+          unit: lux
+          value: 350.0
+
+    - id: mock-water-02
+      type: mock_sensor
+      interval_sec: 10
+      metrics:
+        - sensor_id: sensor_watertemp_tank_02
+          device_id: mock_probe_02
+          metric: water_temperature
+          unit: celsius
+          value: 18.7
+        - sensor_id: sensor_do_tank_02
+          device_id: mock_probe_02
+          metric: dissolved_oxygen
+          unit: mg/L
+          value: 6.5
+        - sensor_id: sensor_ph_tank_02
+          device_id: mock_probe_02
+          metric: ph
+          unit: ph
+          value: 7.3
+        - sensor_id: sensor_salinity_tank_02
+          device_id: mock_probe_02
+          metric: salinity
+          unit: ppt
+          value: 31.2
+        - sensor_id: sensor_no2_tank_02
+          device_id: mock_probe_02
+          metric: nitrite
+          unit: mg/L
+          value: 0.02
+        - sensor_id: sensor_no3_tank_02
+          device_id: mock_probe_02
+          metric: nitrate
+          unit: mg/L
+          value: 11.5
+        - sensor_id: sensor_co2_tank_02
+          device_id: mock_probe_02
+          metric: carbon_dioxide
+          unit: mg/L
+          value: 8.2
+        - sensor_id: sensor_tts_tank_02
+          device_id: mock_probe_02
+          metric: total_suspended_solids
+          unit: mg/L
+          value: 14.5
+        - sensor_id: sensor_nh3_tank_02
+          device_id: mock_probe_02
+          metric: unionized_ammonia
+          unit: mg/L
+          value: 0.01
+        - sensor_id: sensor_flow_rate_tank_02
+          device_id: pump_02
+          metric: flow_rate
+          unit: L/min
+          value: 118.0
+        - sensor_id: sensor_pump_pressure_tank_02
+          device_id: pump_02
+          metric: pump_pressure
+          unit: kPa
+          value: 41.5
+        - sensor_id: sensor_light_intensity_tank_02
+          device_id: photoperiod_light_02
+          metric: light_intensity
+          unit: lux
+          value: 355.0
+
+    - id: mock-water-03
+      type: mock_sensor
+      interval_sec: 10
+      metrics:
+        - sensor_id: sensor_watertemp_tank_03
+          device_id: mock_probe_03
+          metric: water_temperature
+          unit: celsius
+          value: 18.3
+        - sensor_id: sensor_do_tank_03
+          device_id: mock_probe_03
+          metric: dissolved_oxygen
+          unit: mg/L
+          value: 6.8
+        - sensor_id: sensor_ph_tank_03
+          device_id: mock_probe_03
+          metric: ph
+          unit: ph
+          value: 7.5
+        - sensor_id: sensor_salinity_tank_03
+          device_id: mock_probe_03
+          metric: salinity
+          unit: ppt
+          value: 30.8
+        - sensor_id: sensor_no2_tank_03
+          device_id: mock_probe_03
+          metric: nitrite
+          unit: mg/L
+          value: 0.03
+        - sensor_id: sensor_no3_tank_03
+          device_id: mock_probe_03
+          metric: nitrate
+          unit: mg/L
+          value: 12.5
+        - sensor_id: sensor_co2_tank_03
+          device_id: mock_probe_03
+          metric: carbon_dioxide
+          unit: mg/L
+          value: 7.8
+        - sensor_id: sensor_tts_tank_03
+          device_id: mock_probe_03
+          metric: total_suspended_solids
+          unit: mg/L
+          value: 15.5
+        - sensor_id: sensor_nh3_tank_03
+          device_id: mock_probe_03
+          metric: unionized_ammonia
+          unit: mg/L
+          value: 0.01
+        - sensor_id: sensor_flow_rate_tank_03
+          device_id: pump_03
+          metric: flow_rate
+          unit: L/min
+          value: 122.0
+        - sensor_id: sensor_pump_pressure_tank_03
+          device_id: pump_03
+          metric: pump_pressure
+          unit: kPa
+          value: 42.5
+        - sensor_id: sensor_light_intensity_tank_03
+          device_id: photoperiod_light_03
+          metric: light_intensity
+          unit: lux
+          value: 345.0
+
+    - id: mock-water-04
+      type: mock_sensor
+      interval_sec: 10
+      metrics:
+        - sensor_id: sensor_watertemp_tank_04
+          device_id: mock_probe_04
+          metric: water_temperature
+          unit: celsius
+          value: 18.6
+        - sensor_id: sensor_do_tank_04
+          device_id: mock_probe_04
+          metric: dissolved_oxygen
+          unit: mg/L
+          value: 6.6
+        - sensor_id: sensor_ph_tank_04
+          device_id: mock_probe_04
+          metric: ph
+          unit: ph
+          value: 7.4
+        - sensor_id: sensor_salinity_tank_04
+          device_id: mock_probe_04
+          metric: salinity
+          unit: ppt
+          value: 31.1
+        - sensor_id: sensor_no2_tank_04
+          device_id: mock_probe_04
+          metric: nitrite
+          unit: mg/L
+          value: 0.02
+        - sensor_id: sensor_no3_tank_04
+          device_id: mock_probe_04
+          metric: nitrate
+          unit: mg/L
+          value: 11.8
+        - sensor_id: sensor_co2_tank_04
+          device_id: mock_probe_04
+          metric: carbon_dioxide
+          unit: mg/L
+          value: 8.1
+        - sensor_id: sensor_tts_tank_04
+          device_id: mock_probe_04
+          metric: total_suspended_solids
+          unit: mg/L
+          value: 14.8
+        - sensor_id: sensor_nh3_tank_04
+          device_id: mock_probe_04
+          metric: unionized_ammonia
+          unit: mg/L
+          value: 0.01
+        - sensor_id: sensor_flow_rate_tank_04
+          device_id: pump_04
+          metric: flow_rate
+          unit: L/min
+          value: 119.0
+        - sensor_id: sensor_pump_pressure_tank_04
+          device_id: pump_04
+          metric: pump_pressure
+          unit: kPa
+          value: 41.8
+        - sensor_id: sensor_light_intensity_tank_04
+          device_id: photoperiod_light_04
+          metric: light_intensity
+          unit: lux
+          value: 352.0
+
+    - id: mock-feeder-01
+      type: mock_feeder
+      interval_sec: 30
+      metrics:
+        - sensor_id: sensor_feed_weight_tank_01
+          device_id: feeder_01
+          metric: feed_weight
+          unit: kg
+          value: 18.5
+
+    - id: mock-feeder-02
+      type: mock_feeder
+      interval_sec: 30
+      metrics:
+        - sensor_id: sensor_feed_weight_tank_02
+          device_id: feeder_02
+          metric: feed_weight
+          unit: kg
+          value: 17.8
+
+    - id: mock-feeder-03
+      type: mock_feeder
+      interval_sec: 30
+      metrics:
+        - sensor_id: sensor_feed_weight_tank_03
+          device_id: feeder_03
+          metric: feed_weight
+          unit: kg
+          value: 19.2
+
+    - id: mock-feeder-04
+      type: mock_feeder
+      interval_sec: 30
+      metrics:
+        - sensor_id: sensor_feed_weight_tank_04
+          device_id: feeder_04
+          metric: feed_weight
+          unit: kg
+          value: 18.1
+
+rules:
+  enabled: true
+  config_path: ./configs/rules.example.yaml
+
+control:
+  enabled: true
+  automatic_commands_enabled: false
+  require_idempotency_key: true
+  default_command_ttl_sec: 60
+  adapters:
+    - id: mock-control-01
+      type: mock_control
+      timeout_sec: 5
+
+sync:
+  enabled: true
+  mode: offline_queue
+  endpoint: null                    # 예) https://api.bluei.kr/gx10/sync/batches  (※ /v1 없음 — 루트 경로)
+  # 아래 두 값 = bluei 앱 [GX10 연결]에서 노드 등록 시 발급되는 값을 그대로 입력:
+  node_code: ""                     # 앱에서 등록한 node_code (X-GX10-Node 헤더로 전송)
+  access_token: ""                  # 앱이 발급한 GX10 노드 토큰(1회 표시; user JWT 아님)
+  daily_cron_kst: ""                # "HH:MM" KST. 비어있으면 daily 트리거 비활성. 운영: "03:00"
+  batch_size: 1000
+  http_timeout_sec: 60
+  retry:
+    min_backoff_sec: 30
+    max_backoff_sec: 900
+
+inference:
+  enabled: false
+  mode: disabled
+  ollama:
+    endpoint: http://127.0.0.1:11435
+    model: gemma4:26b
+    timeout_sec: 30
+  # G-3 LRCN vision_pipeline. enabled=true 면 cycle 시작 시 capture→LRCN→VisionObservation 자동 적재.
+  # 블루오션 transfer baseline `.pt` (c14) 사용. CPU 1.17s/clip 측정. enabled=false 면 wire skip.
+  lrcn:
+    enabled: true
+    endpoint: http://127.0.0.1:8081
+    timeout_sec: 15
+
+# Cage/Tank baseline 자동 주기 평가 (docs/29 Phase 1.5).
+# Worker 가 비활성이면 [지금 평가하기] 로만 anomaly score 가 산출된다.
+# enabled: false 로 두면 자율 운영 시작 전 안전. 학습된 모델 + 검증 후 enable.
+baseline_worker:
+  enabled: false
+  interval_sec: 600       # 10 분
+  initial_delay_sec: 30   # 부팅 후 30 초 뒤 첫 평가
+
+# C-4: pending_notify 자동 실행 정책 시스템 기본값.
+# Cage/Tank별 override 는 POST /v1/tanks/{id}/decision-policy.
+# auto_execute_enabled 기본값 false — Cage/Tank마다 명시적으로 켜야 타이머 작동.
+decision_policy:
+  auto_execute_enabled: false   # 안전 기본값. Cage/Tank별 enabled=true 로 켜야 함.
+  grace_minutes: 10             # 알림 후 자동 실행까지 대기 분. 최소 1.
+
+# D-5: 일일 추정 체중 스냅샷 (Cage/Tank 시계열).
+# Worker 가 active lifecycle 가두리마다 1시간마다 projection 계산 후 upsert.
+# 같은 날 안에는 같은 row 가 마지막 값으로 갱신됨.
+weight_history_worker:
+  enabled: true
+  interval_sec: 3600       # 1시간
+  initial_delay_sec: 30
+
+# Phase 4 predictive safety (D-6 + C-3p). Default OFF for FIPA D-11 demo.
+# Turn on only after validating the waste model + capacity inputs.
+predictive_safety:
+  enabled: false
+  nh3_caution_ratio: 0.7
+
+# Phase 3 Feed cycle state machine worker.
+# adaptive: 목표량 / max_pulses / max_duration 기반 자동 종료
+# fixed:    펄스 횟수 고정 비율 급이
+# Phase 4 hook: SafetyGate (predictive water-quality block) wired when predictive_safety.enabled=true
+feed_cycle:
+  enabled: true
+  default_gap_ms: 60000           # gap_ms 미지정 시 fallback (1분)
+  default_pulse_duration_ms: 5000 # pulse_duration_ms 미지정 시 fallback (5초)
+  pulse_dispatch_timeout_sec: 30  # ESP32 명령 큐잉 타임아웃
+
+# G-2 Sprint: feed cycle 시작 시점 7초 영상 캡처 워커.
+# mode=fixture (본선 D-6 환경, RTSP 실기 없음): fixture_path 의 mp4 를 temp_dir 로 복사.
+# mode=rtsp    (강릉 D-18 이후, 실 카메라): gst-launch-1.0 + rtspsrc 로 N초 캡처.
+# G-3 pipeline 이 결과 mp4 를 LRCN /v1/vision/feeding-score 로 보내고 VisionObservation 적재.
+capture:
+  enabled: true
+  mode: fixture                              # "fixture" | "rtsp"
+  fixture_path: /tmp/lrcn-verify/test-hungry-0.90.mp4  # c14 검증용 7초 sample (352KB)
+  duration_seconds: 7                        # 0 → 7
+  # R19 — 강릉 D-18 외장 하드 운영 시:
+  #   1) 외장 하드 mount (예: /mnt/usb-captures) 확인
+  #   2) systemd 또는 fstab 으로 부팅 시 auto-mount
+  #   3) temp_dir 를 mount point 로 변경 (예: /mnt/usb-captures)
+  #   4) RetentionMinutes + max_disk_percent 둘 다 설정 (안전망 2중)
+  # 디스크 용량 추정: 7초 mp4 × 4 채널 × 24h = ~17 GB/day → 1TB = 약 2개월
+  temp_dir: /tmp/bluei-edge/captures         # 0 → 같음 (강릉: /mnt/usb-captures 권장)
+  retention_minutes: 60                      # 60분 초과 mp4 자동 cleanup. 0 → 60. 음수 → 비활성
+
+  # R6.1 — 상시 캡처. cycle hook 과 독립적으로 ContinuousTanks 의 카메라에서
+  # DurationSeconds 간격 연속 mp4 적재. phase=feeding(cycle 활성 시) | baseline(외).
+  # 사용자 라벨링 풀 = baseline ∪ feeding 두 풀.
+  #
+  # ⚠️ fixture 모드 + continuous=true 는 같은 fixture 영상 반복 복사 → dev 검증 외 권장 X.
+  # 강릉 D-18 mode=rtsp 전환 시 실 영상 누적 시작.
+  #
+  # 디스크 추정: 7초 mp4 × 4 채널 / 7초 = 4 clip/7s → ~17 GB/day/4cam (외장 하드 권장).
+  continuous: false                          # 강릉 D-18 mode=rtsp 전환 시 true. fixture 검증은 R19 PASS.
+  continuous_tanks: ["tank_01", "tank_02", "tank_03", "tank_04"]
+  continuous_mode_spacing_seconds: 30        # 0 → DurationSeconds. fixture 검증 시 30초 spacing 권장 (디스크 부담 최소)
+
+  # R17 — 디스크 사용률 임계 강제 cleanup (강릉 D-18 외장 하드 안전망).
+  # 0 → 비활성 (RetentionMinutes 만 적용). 권장: 80~85.
+  # 임계 초과 시 *captures + excluded 모두에서* 오래된 mp4 부터 삭제.
+  max_disk_percent: 0
+
+# Phase 4 C-3l: 학습 안전 게이트.
+# operator_disputes 집계로 learned_rules 를 주기 마이닝.
+# 충분한 이의제기 데이터(≥3회 패턴) 축적 후 enabled: true 로 활성화.
+#learned_safety:
+#  enabled: false
+#  mine_interval_sec: 3600   # 1시간마다 자동 마이닝
+
+# Phase 4 C-3w: 환경 안전 게이트 (해상 케이지 전용).
+# source: "mock" — 오프라인/테스트용 정적 값. 실제 운영 시 "http" 로 변경.
+# TODO(real-API): 기상청 openAPI + 해양수산부 조수 API 연동 필요.
+#environmental_safety:
+#  enabled: false
+#  source: mock               # "mock" | "http"
+#  http_endpoint: ""          # http source 전용
+#  refresh_interval_sec: 600  # 10분마다 캐시 갱신
+#  wind_max_ms: 12.0           # 해상 케이지 풍속 임계값 (m/s)
+#  wave_max_m: 2.0             # 파고 임계값 (m)
+
+# Phase 5: operator feeding schedule worker.
+# Polls every interval_sec and fires feed cycles for matching schedules.
+schedule:
+  enabled: true
+  interval_sec: 30
+
+# Phase F.1 — operator_intent 종합 판단용 로컬 LLM (별도 inference.* 와 분리).
+# enabled: false 면 backend 가 LLM hook 을 skip 하고 기존 동작만 유지.
+# primary 호출 실패 / JSON parse 실패 / confidence < 0.4 시 fallback 자동 시도.
+llm:
+  enabled: true
+  endpoint: http://localhost:11435
+  auth_token: devtoken
+  primary_model: gemma4:e4b
+  fallback_model: gemma4:26b
+  timeout_sec: 60
+  # 운영자 가이드 채팅(/v1/assistant/chat)용 모델. 비어있으면 bluei-edge-assistant.
+  assistant_model: bluei-edge-assistant
+  # 어시스턴트 모델 GPU 상주 시간(ollama keep_alive). 비어있으면 30m, "-1"=무기한.
+  assistant_keep_alive: 30m
+
+# Phase G: Arbiter 환경 safety gate.
+# 모든 cycle 시작 요청은 Arbiter 를 거치며, 아래 임계 위반 시 reject.
+# 운영자 force 포함 — 어떤 의도로도 bypass 불가 (어체 생존 임계).
+arbiter:
+  safety_gate:
+    enabled: true
+    sensor_max_stale_sec: 300    # 5분 이상 sensor reading 없으면 reject
+    # Atlantic salmon RAS 임계
+    temp_min_c: 4.0              # 수온 최저 (생존 임계)
+    temp_max_c: 20.0             # 수온 최고 (생존 임계)
+    do_min_mg_l: 5.0             # DO 최소 (포화 기준)

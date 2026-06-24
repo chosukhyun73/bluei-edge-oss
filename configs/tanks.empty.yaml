@@ -1,0 +1,5 @@
+# 운영 fresh install 용 빈 tanks seed.
+# tanks.config_path 는 validation 에서 required 라 빈 문자열 불가 —
+# 빈 리스트 yaml 로 seed 0건 + validation 통과.
+# 실제 수조는 dashboard 에서 등록.
+tanks: []

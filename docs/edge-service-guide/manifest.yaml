@@ -1,0 +1,71 @@
+# Edge Service Guide — page manifest
+# Drives nav order, titles, and slugs on the bluei.kr edge guide page.
+# Edit this file to add / reorder / rename pages. `file` is relative to pages/.
+
+guide:
+  title: bluei-edge Operator Guide
+  product: bluei-edge dashboard
+  applies_to: "0.1.0"
+  language: en
+  last_updated: 2026-06-23
+
+pages:
+  - slug: overview
+    title: Overview & Safety Principles
+    file: 00-overview.md
+    order: 0
+    summary: What the edge system does, how it stays safe, and who owns each decision.
+
+  - slug: installation
+    title: Installation (self-install)
+    file: installation.md
+    order: 1
+    summary: Install bluei-edge yourself on a farm-site device, with no on-site visit required.
+
+  - slug: access-and-login
+    title: Access & Login
+    file: 01-access-and-login.md
+    order: 2
+    summary: Reach the dashboard, sign in via phone approval, and read the screen layout.
+
+  - slug: initial-setup
+    title: Initial Setup (one-time)
+    file: 02-initial-setup.md
+    order: 3
+    summary: Register farm, site, groups, tanks, sensors, devices, cameras, controllers, and stocking.
+
+  - slug: daily-operations
+    title: Daily Operations
+    file: 03-daily-operations.md
+    order: 4
+    summary: Monitor tanks, run feeding cycles (auto/manual), and read alerts and the safety gate.
+
+  - slug: ai-management
+    title: AI Management
+    file: 04-ai-management.md
+    order: 5
+    summary: Operating policy, inference monitor, on-site AI training, and learned safety rules.
+
+  - slug: records-and-trade
+    title: Production Records & Trade
+    file: 05-records-and-trade.md
+    order: 6
+    summary: Log mortality/treatment/transfer events and manage stocking, shipping, and documents.
+
+  - slug: system-operations
+    title: System Operations
+    file: 06-system-operations.md
+    order: 7
+    summary: AI assistant, safe shutdown, offline behavior, and sync status.
+
+  - slug: troubleshooting
+    title: Troubleshooting
+    file: 07-troubleshooting.md
+    order: 8
+    summary: Blank screen, 401, sensors not updating, camera connection failures, and more.
+
+  - slug: glossary
+    title: Glossary
+    file: 08-glossary.md
+    order: 9
+    summary: BSF, GET, density, RAS, WTG, safety gate, and other terms used in the dashboard.

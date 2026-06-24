@@ -1,0 +1,10 @@
+logging:
+  level: info
+  format: jsonl
+  output:
+    stdout: true
+    file:
+      enabled: true
+      path: ./var/bluei-edge/logs/edge.log
+      max_size_mb: 10
+      max_files: 5

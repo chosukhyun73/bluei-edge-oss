@@ -1,0 +1,30 @@
+[Unit]
+Description=BlueI LattePanda Sensor Gateway
+Documentation=file:/opt/bluei-edge/docs/lattepanda-gateway-agent.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bluei-gateway
+Group=bluei-gateway
+SupplementaryGroups=dialout
+WorkingDirectory=/opt/bluei-edge
+EnvironmentFile=-/etc/bluei/lattepanda-gateway.env
+ExecStart=/usr/local/bin/lattepanda-gateway run -config /etc/bluei/lattepanda-gateway.yaml
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+# Conservative hardening. Relax only if the chosen sensor adapter requires it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bluei /var/log/bluei /run /tmp
+DeviceAllow=/dev/bluei-leonardo-sensor rw
+DeviceAllow=/dev/ttyACM0 rw
+DevicePolicy=closed
+
+[Install]
+WantedBy=multi-user.target

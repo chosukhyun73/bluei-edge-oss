@@ -1,0 +1,79 @@
+# Camera profiles seed — boot 시 camera_profiles 테이블에 upsert.
+# 실제 운영 시 password 는 KV store (camera_secret:{camera_id}:password) 또는
+# 환경변수 기반 secret_ref 로 주입. yaml 에 plaintext password 절대 금지.
+#
+# 본선 시연 환경: mock RTSP host (실제 송출 없음).
+# dashboard 가 /v1/cameras/{id}/live.mjpeg 호출 시 GStreamer 파이프라인 실패 →
+# CameraTile 이 자동으로 'unverified/offline' 플레이스홀더로 fallback.
+# 실제 카메라 연결 시 host/credentials 만 교체하면 즉시 라이브 송출.
+#
+# 본선 사양: 측면 4대 (수조 4기 = 측면 4 카메라, 추론용). 탑뷰는 본선 후.
+
+cameras:
+  - camera_id: cam_tank_01_side
+    tank_id: tank_01
+    display_name: 강릉 RAS Tank 01 측면
+    vendor: hikvision
+    host: 192.168.10.101
+    rtsp_port: 554
+    http_port: 80
+    username: admin
+    position: side
+    purpose: [operator_view, vision_ai]
+    status: configured
+    stream_profiles:
+      main: { path: /Streaming/Channels/101, codec: h264 }
+      sub:  { path: /Streaming/Channels/102, codec: h264 }
+    clip_policy: { retain_days: 7 }
+    metadata: { source: example_config, mock: true }
+
+  - camera_id: cam_tank_02_side
+    tank_id: tank_02
+    display_name: 강릉 RAS Tank 02 측면
+    vendor: hikvision
+    host: 192.168.10.102
+    rtsp_port: 554
+    http_port: 80
+    username: admin
+    position: side
+    purpose: [operator_view, vision_ai]
+    status: configured
+    stream_profiles:
+      main: { path: /Streaming/Channels/101, codec: h264 }
+      sub:  { path: /Streaming/Channels/102, codec: h264 }
+    clip_policy: { retain_days: 7 }
+    metadata: { source: example_config, mock: true }
+
+  - camera_id: cam_tank_03_side
+    tank_id: tank_03
+    display_name: 강릉 RAS Tank 03 측면
+    vendor: hikvision
+    host: 192.168.10.103
+    rtsp_port: 554
+    http_port: 80
+    username: admin
+    position: side
+    purpose: [operator_view, vision_ai]
+    status: configured
+    stream_profiles:
+      main: { path: /Streaming/Channels/101, codec: h264 }
+      sub:  { path: /Streaming/Channels/102, codec: h264 }
+    clip_policy: { retain_days: 7 }
+    metadata: { source: example_config, mock: true }
+
+  - camera_id: cam_tank_04_side
+    tank_id: tank_04
+    display_name: 강릉 RAS Tank 04 측면
+    vendor: hikvision
+    host: 192.168.10.104
+    rtsp_port: 554
+    http_port: 80
+    username: admin
+    position: side
+    purpose: [operator_view, vision_ai]
+    status: configured
+    stream_profiles:
+      main: { path: /Streaming/Channels/101, codec: h264 }
+      sub:  { path: /Streaming/Channels/102, codec: h264 }
+    clip_policy: { retain_days: 7 }
+    metadata: { source: example_config, mock: true }

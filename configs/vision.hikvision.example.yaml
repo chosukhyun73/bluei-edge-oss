@@ -1,0 +1,37 @@
+# Hikvision RTSP camera connection template.
+# Copy this file to a local, untracked config if needed and inject secrets via env vars.
+# Do not commit real passwords or full credential-bearing RTSP URLs.
+
+mode: real
+
+camera:
+  # Preferred: set BLUEI_CAMERA_RTSP_URL in the shell or service env.
+  # Example value:
+  #   rtsp://admin:${HIKVISION_PASSWORD}@192.168.0.94:554/Streaming/Channels/101
+  source: ${BLUEI_CAMERA_RTSP_URL}
+  width: 1920
+  height: 1080
+  fps: 25
+  vendor: hikvision
+  host: 192.168.0.94
+  rtsp_port: 554
+  channel: 101
+
+feeder:
+  # Keep feeder disabled/not connected for camera-only preparation.
+  port: /dev/null
+  baudrate: 115200
+
+model:
+  weights: services/vision/models/fish_detector/weights/best.pt
+  device: cpu
+  conf: 0.4
+
+policy:
+  # AI/operator support only. Do not directly control feeding from camera inference.
+  feed_threshold: 55.0
+  feed_intensity: 0.5
+  cooldown_sec: 10.0
+  max_feed_sec: 5.0
+
+socket: /tmp/bluei-vision.sock

@@ -1,0 +1,118 @@
+# Camera AI escalation policy example.
+# Goal: all cameras stay under lightweight monitoring; important events escalate to enhanced analysis.
+
+policy_version: 1
+
+camera_runtime:
+  baseline_camera_count: 4
+  planned_max_camera_count: 8
+  default_ingest_resolution: 1920x1080
+  default_inference_resolution: 960x540
+
+modes:
+  lightweight:
+    description: continuous low-cost monitoring on every camera
+    default_fps: 5
+    max_fps: 10
+    resolution: 960x540
+    outputs:
+      - stream_health
+      - visibility_score
+      - activity_score
+      - motion_density
+      - event_candidates
+
+  enhanced:
+    description: higher-cost analysis for important events, especially feeding stop/slowdown decisions
+    default_fps: 15
+    max_fps: 30
+    resolution: 1280x720
+    roi_enabled: true
+    clip_window_sec:
+      before: 10
+      after: 20
+    outputs:
+      - feeding_response_score
+      - response_weakening_score
+      - uneaten_feed_candidate
+      - abnormal_behavior_candidate
+      - evidence_clip_ref
+
+camera_priority:
+  high:
+    fps_lightweight: 8
+    fps_enhanced: 20
+  medium:
+    fps_lightweight: 5
+    fps_enhanced: 15
+  low:
+    fps_lightweight: 2
+    fps_enhanced: 10
+
+feeding_policy:
+  normal:
+    mode: lightweight
+    candidates:
+      - visibility_degraded
+      - abnormal_motion
+      - camera_stale
+
+  feeding_start:
+    trigger:
+      - operator_feeding_started
+      - feeder_command_acknowledged
+      - scheduled_feeding_window
+    mode: lightweight
+    observe_for_sec: 30
+    candidates:
+      - feeding_response_onset
+      - no_response_to_feed
+      - camera_or_sensor_stale
+
+  feeding_stop_or_slowdown:
+    trigger:
+      - feeding_response_weakening_candidate
+      - uneaten_feed_candidate
+      - water_quality_safety_warning
+      - operator_review_requested
+    mode: enhanced
+    required_evidence:
+      - feeding_zone_roi
+      - recent_activity_trend
+      - short_clip
+    candidates:
+      - feeding_response_weakened
+      - uneaten_feed_visible
+      - abnormal_behavior
+      - stop_or_slowdown_recommended
+
+  post_feeding:
+    mode: lightweight
+    observe_for_sec: 300
+    candidates:
+      - activity_normalized
+      - residual_abnormal_behavior
+      - visibility_degraded
+
+event_contract:
+  event_type: vision.observation.recorded
+  source_module: vision
+  payload_fields:
+    - observation_id
+    - camera_id
+    - tank_id
+    - mode
+    - phase
+    - observed_at
+    - scores
+    - candidates
+    - evidence
+    - quality
+
+safety:
+  direct_control_allowed: false
+  command_requires:
+    - deterministic_rule
+    - safety_gate
+    - operator_visible_reason
+    - command_result_audit

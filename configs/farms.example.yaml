@@ -1,0 +1,16 @@
+# Farm registry — top of the 3-layer domain (farms → sites → tanks/cages).
+# A farm represents the business / license holder.
+# References: docs/39-multi-tank-feeder-system-design.md §1.
+
+farms:
+  - farm_id: blueocean_001
+    license_no: "FARM-2026-001234"
+    operator: "블루오션영어조합법인"
+    certifications:
+      - asc
+      - gdst
+    sites:
+      - gangneung_ras_01
+    metadata:
+      contact_email: ""
+      contact_phone: ""

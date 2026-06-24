@@ -1,0 +1,70 @@
+# Controller registry — physical microcontrollers (ESP32 etc.).
+# Mapping is 1 controller : 1 actuator (currently 1 feeder).
+# Lifecycle: pending → active → disabled/fault.
+# 본선 사양: 4 수조 × 1 ESP32 = 4대. 통영 cage 컨트롤러는 본선 외 시드라 제거.
+# References: docs/39-multi-tank-feeder-system-design.md §2.
+
+controllers:
+  - controller_id: feeder_tank_01
+    tank_id: tank_01
+    site_id: gangneung_ras_01
+    actuator_id: feeder_tank_01
+    mac_address: "94:B9:7E:C2:F1:3C"
+    ip_address: "192.168.0.9"
+    firmware_version: "bluei-esp32-feeder-v0.3.0-register"
+    status: active
+    registered_at: 2026-05-16T00:00:00+09:00
+    last_seen_at: 2026-05-17T00:00:00+09:00
+    commissioning:
+      dac_ok: true
+      stop_ok: true
+      latency_ms: 85
+      tested_at: 2026-05-16T00:00:00+09:00
+
+  - controller_id: feeder_tank_02
+    tank_id: tank_02
+    site_id: gangneung_ras_01
+    actuator_id: feeder_tank_02
+    mac_address: "94:B9:7E:C2:F1:3D"
+    ip_address: "192.168.0.10"
+    firmware_version: "bluei-esp32-feeder-v0.3.0-register"
+    status: active
+    registered_at: 2026-05-16T00:00:00+09:00
+    last_seen_at: 2026-05-17T00:00:00+09:00
+    commissioning:
+      dac_ok: true
+      stop_ok: true
+      latency_ms: 92
+      tested_at: 2026-05-16T00:00:00+09:00
+
+  - controller_id: feeder_tank_03
+    tank_id: tank_03
+    site_id: gangneung_ras_01
+    actuator_id: feeder_tank_03
+    mac_address: "94:B9:7E:C2:F1:3E"
+    ip_address: "192.168.0.11"
+    firmware_version: "bluei-esp32-feeder-v0.3.0-register"
+    status: active
+    registered_at: 2026-05-16T00:00:00+09:00
+    last_seen_at: 2026-05-17T00:00:00+09:00
+    commissioning:
+      dac_ok: true
+      stop_ok: true
+      latency_ms: 88
+      tested_at: 2026-05-16T00:00:00+09:00
+
+  - controller_id: feeder_tank_04
+    tank_id: tank_04
+    site_id: gangneung_ras_01
+    actuator_id: feeder_tank_04
+    mac_address: "94:B9:7E:C2:F1:3F"
+    ip_address: "192.168.0.12"
+    firmware_version: "bluei-esp32-feeder-v0.3.0-register"
+    status: active
+    registered_at: 2026-05-16T00:00:00+09:00
+    last_seen_at: 2026-05-17T00:00:00+09:00
+    commissioning:
+      dac_ok: true
+      stop_ok: true
+      latency_ms: 90
+      tested_at: 2026-05-16T00:00:00+09:00

@@ -1,0 +1,96 @@
+# 본선 시연 4 수조 (강릉 RAS 1 site · g1 그룹 · wtg_gng_01)
+# 모두 atlantic_salmon (대서양연어). 통영 해상 cage 는 본선 외 시드라 제거.
+
+tanks:
+  - tank_id: tank_01
+    platform_tank_id: ""
+    display_name: 강릉 RAS Tank 01
+    species: atlantic_salmon
+    system_type: land_based_ras
+    group_id: g1
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    lot_no: "RAS-GNG-2026-001"
+    lifecycle_stage: growout
+    mutable_lifecycle: false
+    volume_m3: 25
+    biomass_kg: 1200
+    fish_count: 2400
+    avg_weight_g: 500
+    target_ranges:
+      - { metric: water_temperature,           min: 10,  max: 16,   unit: celsius }
+      - { metric: dissolved_oxygen,            min: 6,              unit: mg/L }
+      - { metric: dissolved_oxygen_saturation, min: 85,             unit: percent }
+      - { metric: carbon_dioxide,                       max: 12,    unit: mg/L }
+      - { metric: ph,                          min: 6.8, max: 7.8,  unit: ph }
+      - { metric: total_suspended_solids,               max: 25,    unit: mg/L }
+      - { metric: unionized_ammonia,                    max: 0.02,  unit: mg/L }
+    metadata:
+      source: example_config
+      operating_mode: local_first
+
+  - tank_id: tank_02
+    display_name: 강릉 RAS Tank 02
+    species: atlantic_salmon
+    system_type: land_based_ras
+    group_id: g1
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    lot_no: "RAS-GNG-2026-002"
+    lifecycle_stage: fingerling
+    mutable_lifecycle: false
+    volume_m3: 25
+    biomass_kg: 600
+    fish_count: 3000
+    avg_weight_g: 200
+    target_ranges:
+      - { metric: water_temperature,           min: 10,  max: 16,   unit: celsius }
+      - { metric: dissolved_oxygen,            min: 6,              unit: mg/L }
+      - { metric: ph,                          min: 6.8, max: 7.8,  unit: ph }
+      - { metric: unionized_ammonia,                    max: 0.02,  unit: mg/L }
+    metadata:
+      source: example_config
+
+  - tank_id: tank_03
+    display_name: 강릉 RAS Tank 03
+    species: atlantic_salmon
+    system_type: land_based_ras
+    group_id: g1
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    lot_no: "RAS-GNG-2026-003"
+    lifecycle_stage: growout
+    mutable_lifecycle: false
+    volume_m3: 25
+    biomass_kg: 1400
+    fish_count: 2200
+    avg_weight_g: 636
+    target_ranges:
+      - { metric: water_temperature,           min: 10,  max: 16,   unit: celsius }
+      - { metric: dissolved_oxygen,            min: 6,              unit: mg/L }
+      - { metric: ph,                          min: 6.8, max: 7.8,  unit: ph }
+      - { metric: unionized_ammonia,                    max: 0.02,  unit: mg/L }
+    metadata:
+      source: example_config
+
+  - tank_id: tank_04
+    display_name: 강릉 RAS Tank 04
+    species: atlantic_salmon
+    system_type: land_based_ras
+    group_id: g1
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    lot_no: "RAS-GNG-2026-004"
+    lifecycle_stage: growout
+    mutable_lifecycle: false
+    volume_m3: 25
+    biomass_kg: 1100
+    fish_count: 2000
+    avg_weight_g: 550
+    target_ranges:
+      - { metric: water_temperature,           min: 10,  max: 16,   unit: celsius }
+      - { metric: dissolved_oxygen,            min: 6,              unit: mg/L }
+      - { metric: ph,                          min: 6.8, max: 7.8,  unit: ph }
+      - { metric: unionized_ammonia,                    max: 0.02,  unit: mg/L }
+    metadata:
+      source: example_config

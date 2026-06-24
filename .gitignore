@@ -1,0 +1,76 @@
+# Build artifacts
+/bin/
+/bluei-edge
+
+# Local runtime state
+/var/
+
+# Logs
+*.log
+
+# Local secrets
+local-ai/.env
+
+# OS/editor noise
+.DS_Store
+
+# Local firmware secrets
+firmware/esp32-feeder-controller/secrets.h
+firmware/esp32-feeder-controller/secrets.h.bak-*
+
+# AI 모델 가중치 (외부 보관)
+*.pt
+*.onnx
+*.pth
+
+# 학습 산출물 (외부 마운트)
+local-ai/training/runs/
+local-ai/training/data/
+
+# 변환 전용 venv (tf+torch — ~2GB)
+local-ai/training/.venv-convert/
+
+# 블루오션 legacy baseline (회사 자산 — NAS 원본, 재발급 가능. .pt 외 saved_model.pb / variables 차단)
+local-ai/models/blueocean-baseline/
+
+# 활성 모델 manifest + weights (런타임 상태)
+local-ai/models/active/
+
+# Huggingface cache (LLM 모델 weights 다운로드)
+local-ai/llm-tuning/.hf-cache/
+
+# LoRA adapter weights (~수 GB — Git LFS 또는 외부 보관 권장)
+local-ai/llm-tuning/adapters/
+*.safetensors
+
+# Merged HF model + GGUF (수십 GB — 절대 커밋 금지, 외부 보관)
+local-ai/llm-tuning/merged/
+*.gguf
+
+# Production build artifact (made by `make package`)
+dist/
+
+# Python 캐시
+**/__pycache__/
+*.pyc
+
+# Python virtualenv (환경별, 거대)
+**/.venv/
+**/venv/
+*.egg-info/
+
+# Node modules (혹시 누락)
+**/node_modules/
+**/dist/
+
+# 대형 export blob (운영자 외부 자료)
+docs/e0796399-*/
+
+# ESP32 펌웨어 binary 백업 (4MB+, git LFS 미사용)
+firmware/legacy-esp32-backups/*.bin
+
+# llm-wiki 자동 생성 reference audit / scout-gap 산출물 (6시간 주기)
+local-ai/llm-wiki/reports/reference-audits/
+
+# Tauri 자동 생성 산물 (schemas 등)
+web/dashboard/src-tauri/gen/

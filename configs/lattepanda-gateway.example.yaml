@@ -1,0 +1,31 @@
+# LattePanda sensor gateway example config.
+# Runs on LattePanda Linux side. Reads frames from onboard Leonardo (/dev/ttyACM0)
+# or a file/pipe during development, then posts normalized readings to GX10 bluei-edge.
+
+gateway_id: lattepanda_01
+adapter_id: lattepanda-leonardo-01
+edge_base_url: http://127.0.0.1:8080
+post_timeout_sec: 5
+health_interval_sec: 30
+retry_queue_path: storage/queue/lattepanda-gateway.jsonl
+
+sources:
+  - source_id: leonardo_usb_cdc_01
+    type: serial
+    path: /dev/ttyACM0
+    baud: 115200
+    defaults:
+      tank_id: tank_01
+      device_id: feeder_01
+      sensor_id: scale_01
+      metric: feed_weight
+      unit: g
+      quality: ok
+
+# Supported frame formats from Leonardo:
+#
+# 1) JSON line / NDJSON:
+# {"sensor_id":"scale_01","metric":"feed_weight","value":7820,"unit":"g","quality":"ok"}
+#
+# 2) CSV line:
+# scale_01,feed_weight,7820,g,ok

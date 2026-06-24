@@ -1,0 +1,69 @@
+# Sensors — measurement-only devices.
+# 본선 사양: WTG 공유(intake/outlet) 2 + 수조별 in-tank 4. 해상(marine)/GPS 노드는 본선 외.
+# References: docs/39-multi-tank-feeder-system-design.md §1.3.
+
+sensors:
+  # ── WTG 공유 (intake / outlet) ──
+  - sensor_id: wq_intake_01
+    sensor_type: water_quality
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    position: intake
+    capabilities:
+      - temperature
+      - dissolved_oxygen
+      - ph
+      - unionized_ammonia
+      - conductivity
+
+  - sensor_id: wq_outlet_01
+    sensor_type: water_quality
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    position: outlet
+    capabilities:
+      - temperature
+      - dissolved_oxygen
+      - ph
+      - unionized_ammonia
+
+  # ── 수조별 in-tank ──
+  - sensor_id: wq_tank_01
+    sensor_type: water_quality
+    site_id: gangneung_ras_01
+    tank_id: tank_01
+    position: in_tank
+    capabilities:
+      - temperature
+      - dissolved_oxygen
+      - ph
+
+  - sensor_id: wq_tank_02
+    sensor_type: water_quality
+    site_id: gangneung_ras_01
+    tank_id: tank_02
+    position: in_tank
+    capabilities:
+      - temperature
+      - dissolved_oxygen
+      - ph
+
+  - sensor_id: wq_tank_03
+    sensor_type: water_quality
+    site_id: gangneung_ras_01
+    tank_id: tank_03
+    position: in_tank
+    capabilities:
+      - temperature
+      - dissolved_oxygen
+      - ph
+
+  - sensor_id: wq_tank_04
+    sensor_type: water_quality
+    site_id: gangneung_ras_01
+    tank_id: tank_04
+    position: in_tank
+    capabilities:
+      - temperature
+      - dissolved_oxygen
+      - ph

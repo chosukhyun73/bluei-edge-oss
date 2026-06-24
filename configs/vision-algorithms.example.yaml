@@ -1,0 +1,254 @@
+# Vision AI algorithm library example.
+# Algorithms are managed separately from tanks. Tanks select an algorithm profile
+# based on species, growth stage, size/density range, tank shape, camera position,
+# and feeder type.
+#
+# 본선 사양: atlantic_salmon (대서양연어) growout · 원형 수조 · 수중 측면 · impact 사료기.
+
+algorithm_library_version: 1
+
+algorithms:
+  - vision_algorithm_id: vision_atlantic_salmon_growout_circular_side_v1
+    display_name: 대서양연어 성어 / 원형 수조 / 수중 측면 카메라
+    status: candidate # candidate | validated | deprecated
+    species: atlantic_salmon
+    growth_stage: growout
+    size_range_g: [200, 5000]
+    density_range: medium
+    tank_shape: circle
+    tank_size_range_m: [4, 12]
+    camera_position: underwater_side
+    feeder_type: impact
+    source:
+      prototype: scripts/validate_vision.py
+      reference_commit: 72f6bfd
+    outputs:
+      - activity_score
+      - feeding_response_score
+      - surface_cluster_ratio
+      - depth_dispersion
+      - visibility_score
+      - leftover_risk_candidate
+    model:
+      runtime: classical_cv
+      feature_extractor: background_subtraction_optical_flow_depth_metrics
+      weights_path: ""
+      requires_operator_labels: true
+    validation:
+      # dispute (맞아요/틀려요) 라벨로 행동 회귀 정확도를 검증할 때의 최소 표본 수.
+      required_operator_label_count: 30
+      target_label_correlation: 0.6
+      # bbox 부트스트랩 라벨로 YOLO 검출기를 fine-tune 할 때의 최소 표본 수.
+      bootstrap_min_boxes: 200
+      bootstrap_min_frames: 40
+      notes: "본선 시연용 candidate; 학습 데이터 누적 후 validated 승격 예정."
+
+  # R11: baseline 카드는 deprecated. R11 으로 reaction/stability 두 카드 분리.
+  # 향후 fully phase 별 학습 정착 후 yaml 에서 제거 예정.
+  - vision_algorithm_id: vision_lrcn_blueocean_baseline_v1
+    display_name: LRCN 활동성 (블루오션 legacy transfer baseline) [deprecated, R11 분리]
+    status: deprecated
+    species: atlantic_salmon
+    growth_stage: growout
+    size_range_g: [200, 5000]
+    density_range: medium
+    tank_shape: circle
+    tank_size_range_m: [4, 12]
+    camera_position: underwater_side
+    feeder_type: impact
+    source:
+      prototype: services/lrcn/server.py
+      reference_commit: a9279b0
+      legacy_origin: "블루오션 2021-01-25 학습 InceptionV3+LSTM-256 SavedModel (KIARA 감정)"
+    outputs:
+      - feeding_activity
+    model:
+      runtime: pytorch_lrcn
+      feature_extractor: inceptionv3_imagenet_frozen
+      sequence_model: lstm_256
+      weights_path: local-ai/models/blueocean-baseline/bootstrap-2026-05-21-blueocean-final.pt
+      partial_transfer: "LSTM+fc1 from legacy; fc2 random init (라벨 도메인 불일치)"
+      requires_operator_labels: true
+    validation:
+      required_operator_label_count: 30
+      target_label_correlation: 0.6
+      bootstrap_min_boxes: 0
+      bootstrap_min_frames: 0
+      notes: "Transfer baseline. R11 이후 reaction_v1 + stability_v1 카드 사용."
+
+  # R11: 사료 반응 모델 — phase=feeding 영상의 reaction_score 라벨로 fc2 fine-tune.
+  - vision_algorithm_id: vision_lrcn_blueocean_reaction_v1
+    display_name: LRCN 사료 반응 (블루오션, feeding phase)
+    status: candidate
+    species: atlantic_salmon
+    growth_stage: growout
+    size_range_g: [200, 5000]
+    density_range: medium
+    tank_shape: circle
+    tank_size_range_m: [4, 12]
+    camera_position: underwater_side
+    feeder_type: impact
+    source:
+      prototype: services/lrcn/server.py
+      reference_commit: a9279b0
+      legacy_origin: "블루오션 baseline_v1 으로부터 R11 분기 (2026-05-21)"
+    outputs:
+      - reaction_score
+    model:
+      runtime: pytorch_lrcn
+      feature_extractor: inceptionv3_imagenet_frozen
+      sequence_model: lstm_256
+      # 초기 가중치 = baseline transfer. fine-tune 후 자체 weights 갱신.
+      weights_path: local-ai/models/blueocean-baseline/bootstrap-2026-05-21-blueocean-final.pt
+      training_phase: feeding   # ← R11.2: finetune 시 reaction.csv manifest 선택 기준
+      requires_operator_labels: true
+    validation:
+      required_operator_label_count: 30
+      target_label_correlation: 0.6
+      bootstrap_min_boxes: 0
+      bootstrap_min_frames: 0
+      notes: "phase=feeding 영상 + during_score 로 fine-tune. cycle 활성 중 활동성 평가."
+
+  # R11: 안정성 모델 — phase=baseline 영상의 stability_score 라벨로 fc2 fine-tune.
+  - vision_algorithm_id: vision_lrcn_blueocean_stability_v1
+    display_name: LRCN 안정성 (블루오션, baseline phase)
+    status: candidate
+    species: atlantic_salmon
+    growth_stage: growout
+    size_range_g: [200, 5000]
+    density_range: medium
+    tank_shape: circle
+    tank_size_range_m: [4, 12]
+    camera_position: underwater_side
+    feeder_type: impact
+    source:
+      prototype: services/lrcn/server.py
+      reference_commit: a9279b0
+      legacy_origin: "블루오션 baseline_v1 으로부터 R11 분기 (2026-05-21)"
+    outputs:
+      - stability_score
+    model:
+      runtime: pytorch_lrcn
+      feature_extractor: inceptionv3_imagenet_frozen
+      sequence_model: lstm_256
+      weights_path: local-ai/models/blueocean-baseline/bootstrap-2026-05-21-blueocean-final.pt
+      training_phase: baseline  # ← R11.2: finetune 시 stability.csv manifest 선택 기준
+      requires_operator_labels: true
+    validation:
+      required_operator_label_count: 30
+      target_label_correlation: 0.6
+      bootstrap_min_boxes: 0
+      bootstrap_min_frames: 0
+      notes: "phase=baseline 영상 + pre_score 로 fine-tune. cycle 외 평소 안정성 평가."
+
+# Tank applications — 본선 4 수조에 동일 알고리즘 적용.
+tank_applications:
+  - tank_id: tank_01
+    camera_id: cam_tank_01_side
+    applied_vision_algorithm_id: vision_atlantic_salmon_growout_circular_side_v1
+    current_growth_stage: growout
+    current_avg_weight_g: 500
+    current_density_range: medium
+    roi:
+      feeding_zone: null
+      exclude_zones: []
+    calibration:
+      surface_direction: top
+      depth_axis: y
+      visibility_baseline: null
+    label_policy:
+      feeding_response_scale: "0_to_5"
+      collect_during_feeding: true
+
+  - tank_id: tank_02
+    camera_id: cam_tank_02_side
+    applied_vision_algorithm_id: vision_atlantic_salmon_growout_circular_side_v1
+    current_growth_stage: fingerling
+    current_avg_weight_g: 200
+    current_density_range: medium
+    roi:
+      feeding_zone: null
+      exclude_zones: []
+    calibration:
+      surface_direction: top
+      depth_axis: y
+      visibility_baseline: null
+    label_policy:
+      feeding_response_scale: "0_to_5"
+      collect_during_feeding: true
+
+  - tank_id: tank_03
+    camera_id: cam_tank_03_side
+    applied_vision_algorithm_id: vision_atlantic_salmon_growout_circular_side_v1
+    current_growth_stage: growout
+    current_avg_weight_g: 636
+    current_density_range: medium
+    roi:
+      feeding_zone: null
+      exclude_zones: []
+    calibration:
+      surface_direction: top
+      depth_axis: y
+      visibility_baseline: null
+    label_policy:
+      feeding_response_scale: "0_to_5"
+      collect_during_feeding: true
+
+  - tank_id: tank_04
+    camera_id: cam_tank_04_side
+    applied_vision_algorithm_id: vision_atlantic_salmon_growout_circular_side_v1
+    current_growth_stage: growout
+    current_avg_weight_g: 550
+    current_density_range: medium
+    roi:
+      feeding_zone: null
+      exclude_zones: []
+    calibration:
+      surface_direction: top
+      depth_axis: y
+      visibility_baseline: null
+    label_policy:
+      feeding_response_scale: "0_to_5"
+      collect_during_feeding: true
+
+
+dataset_workflow:
+  capture_policy:
+    continuous_raw_video: false
+    normal_sample_fps: 1
+    feeding_clip_window_sec:
+      before: 10
+      after: 120
+    anomaly_clip_window_sec:
+      before: 10
+      after: 30
+    retention_days:
+      snapshots: 30
+      event_clips: 90
+      training_samples: 365
+  conversion:
+    frame_sample_fps: 5
+    roi_crop_enabled: true
+    feature_series_enabled: true
+    align_with_feeding_events: true
+    align_with_water_quality_buckets: true
+  labeling:
+    enabled: true
+    feeding_response_scale: "0_to_5"
+    labels:
+      - feeding_response_score
+      - activity_level
+      - visibility_quality
+      - leftover_feed_candidate
+      - abnormal_behavior_candidate
+  training:
+    enabled: false
+    mode: supervised_calibration
+    min_labeled_events: 30
+    output_status: candidate
+  validation_gate:
+    min_labeled_events: 30
+    min_label_correlation: 0.6
+    max_false_stop_candidate_rate: 0.15
+    min_visibility_valid_rate: 0.8
+    max_inference_latency_ms: 200

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+src-tauri/target/
+.env
+.env.local
+
+# 생성물: lang-packs 에서 조립되는 로케일(en 베이스만 커밋)
+src/locales/*.json
+!src/locales/en.json

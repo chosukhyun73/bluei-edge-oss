@@ -1,0 +1,30 @@
+rules:
+  - rule_id: rule_do_low_tank
+    enabled: true
+    type: threshold
+    metric: dissolved_oxygen
+    subject:
+      kind: tank
+      id: tank_01
+    condition:
+      operator: "<"
+      value: 5.0
+      unit: mg/L
+      duration_sec: 180
+      evaluation:
+        mode: continuous_latest
+        min_samples: 3
+    alert:
+      alert_type: water_quality.low_dissolved_oxygen
+      severity: warning
+      message: Dissolved oxygen is below threshold.
+
+  - rule_id: rule_sensor_missing
+    enabled: true
+    type: missing_data
+    metric: dissolved_oxygen
+    max_age_sec: 300
+    alert:
+      alert_type: sensor.missing_data
+      severity: warning
+      message: Dissolved oxygen data is stale or missing.

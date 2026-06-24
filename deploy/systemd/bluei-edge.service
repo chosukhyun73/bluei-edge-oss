@@ -1,0 +1,49 @@
+[Unit]
+Description=bluei-edge — RAS aquaculture edge runtime (offline-capable)
+Documentation=https://github.com/bluei/bluei-edge
+After=network-online.target ollama.service
+Wants=network-online.target
+# Ollama (local LLM gemma4) is recommended but not strictly required —
+# bluei-edge can run with LLM disabled. So `Wants=` not `Requires=`.
+Wants=ollama.service
+
+[Service]
+Type=simple
+User=bluei-edge
+Group=bluei-edge
+WorkingDirectory=/opt/bluei-edge
+
+# Operator token comes from the env file. Generate one with `openssl rand -hex 32`
+# and write it to /etc/bluei-edge/env as: BLUEI_EDGE_OPERATOR_TOKEN=...
+EnvironmentFile=-/etc/bluei-edge/env
+
+# Resolve dashboard relative to install dir (not WorkingDirectory) so the binary
+# can find the SPA assets regardless of where systemd cd's.
+Environment=BLUEI_EDGE_DASHBOARD_DIR=/opt/bluei-edge/web/dashboard/dist
+
+ExecStart=/opt/bluei-edge/bin/bluei-edge run -config /etc/bluei-edge/edge.yaml
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+
+# Runtime data — sqlite db + WAL + logs.
+StateDirectory=bluei-edge
+ReadWritePaths=/var/lib/bluei-edge /etc/bluei-edge
+
+# Standard journal logging.
+StandardOutput=journal
+StandardError=journal
+
+# Hardening — edge appliance defaults. Tighten/relax per deployment.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

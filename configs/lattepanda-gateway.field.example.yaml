@@ -1,0 +1,22 @@
+# Field deployment example for LattePanda sensor gateway.
+# Copy to /etc/bluei/lattepanda-gateway.yaml on the LattePanda and adjust GX10 LAN IP.
+
+gateway_id: lattepanda_01
+adapter_id: lattepanda-leonardo-01
+edge_base_url: http://192.168.0.XXX:8080 # GX10 LAN IP, not localhost when running on LattePanda
+post_timeout_sec: 5
+health_interval_sec: 30
+retry_queue_path: /var/lib/bluei/lattepanda-gateway/retry-readings.jsonl
+
+sources:
+  - source_id: leonardo_usb_cdc_01
+    type: serial
+    path: /dev/bluei-leonardo-sensor
+    baud: 115200
+    defaults:
+      tank_id: tank_01
+      device_id: feeder_01
+      sensor_id: scale_01
+      metric: feed_weight
+      unit: g
+      quality: ok

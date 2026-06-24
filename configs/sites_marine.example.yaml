@@ -1,0 +1,4 @@
+# Marine cage sites — 본선 시연에서는 미사용. 해상 시나리오는 본선 후 별도 시드.
+# Marine 추가 시 GPS points + heading 형식은 docs/39 §1.3, §9 참고.
+
+sites_marine: []

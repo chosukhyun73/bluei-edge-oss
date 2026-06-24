@@ -1,0 +1,479 @@
+devices:
+  - device_id: mock_probe_01
+    device_type: water_probe
+    adapter_id: mock-water-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      # Optional cloud mapping. Leave empty for local-only operation.
+      # When configured, this should match bluei-platform tanks.id.
+      platform_tank_id: ""
+    capabilities: []
+
+  - device_id: feeder_01
+    device_type: feeder
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      platform_tank_id: ""
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.weight.read
+      - feed.hopper.status
+
+  - device_id: pump_01
+    device_type: pump
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      platform_tank_id: ""
+    capabilities:
+      - pump.status.read
+      - flow_rate.read
+      - pump_pressure.read
+
+  - device_id: oxygen_supplier_01
+    device_type: oxygen_supplier
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      platform_tank_id: ""
+    capabilities:
+      - oxygen.status.read
+
+  - device_id: aerator_01
+    device_type: aerator
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      platform_tank_id: ""
+    capabilities:
+      - aeration.status.read
+
+  - device_id: uv_sterilizer_01
+    device_type: uv_sterilizer
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      platform_tank_id: ""
+    capabilities:
+      - uv.status.read
+
+  - device_id: ozone_generator_01
+    device_type: ozone_generator
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      platform_tank_id: ""
+    capabilities:
+      - ozone.status.read
+
+  - device_id: biofilter_01
+    device_type: biofilter
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      platform_tank_id: ""
+    capabilities:
+      - biofilter.status.read
+
+  - device_id: photoperiod_light_01
+    device_type: photoperiod_light
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      platform_tank_id: ""
+    capabilities:
+      - light.status.read
+      - photoperiod.schedule.read
+
+  # ESP32 Wi-Fi controller. ESP32 polls as controller_id=feeder_tank_01.
+  # adapter_id 가 controller_id 와 일치해야 명령이 ESP32 폴링 큐로 전달됨 (2026-05-22 fix).
+  - device_id: feeder_esp32_01
+    device_type: feeder
+    adapter_id: feeder_tank_01
+    location:
+      area_id: farm_dev
+      tank_id: tank_01
+      platform_tank_id: ""
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.dispense
+      - feed.set_speed
+      - feed.set_amount
+      - feed.calibrate.tare
+      - feed.calibrate.set_factor
+      - feed.read_weight
+      - feed.calibrate.cal_reset
+      - feed.calibrate.add_point
+      - feed.calibrate.cal_finalize
+      - feed.calibrate.set_linear
+      - feeder.commissioning_test
+      - feeder.status.read
+
+# ── Tank 02 ──────────────────────────────────────────────────────────────────
+  - device_id: mock_probe_02
+    device_type: water_probe
+    adapter_id: mock-water-02
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities: []
+
+  - device_id: feeder_02
+    device_type: feeder
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.weight.read
+      - feed.hopper.status
+
+  - device_id: pump_02
+    device_type: pump
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities:
+      - pump.status.read
+      - flow_rate.read
+      - pump_pressure.read
+
+  - device_id: oxygen_supplier_02
+    device_type: oxygen_supplier
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities:
+      - oxygen.status.read
+
+  - device_id: aerator_02
+    device_type: aerator
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities:
+      - aeration.status.read
+
+  - device_id: uv_sterilizer_02
+    device_type: uv_sterilizer
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities:
+      - uv.status.read
+
+  - device_id: ozone_generator_02
+    device_type: ozone_generator
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities:
+      - ozone.status.read
+
+  - device_id: biofilter_02
+    device_type: biofilter
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities:
+      - biofilter.status.read
+
+  - device_id: photoperiod_light_02
+    device_type: photoperiod_light
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities:
+      - light.status.read
+      - photoperiod.schedule.read
+
+  - device_id: feeder_esp32_02
+    device_type: feeder
+    adapter_id: feeder_tank_02
+    location:
+      area_id: farm_dev
+      tank_id: tank_02
+      platform_tank_id: ""
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.dispense
+      - feed.set_speed
+      - feed.set_amount
+      - feed.calibrate.tare
+      - feed.calibrate.set_factor
+      - feed.read_weight
+      - feed.calibrate.cal_reset
+      - feed.calibrate.add_point
+      - feed.calibrate.cal_finalize
+      - feed.calibrate.set_linear
+      - feeder.commissioning_test
+      - feeder.status.read
+
+# ── Tank 03 ──────────────────────────────────────────────────────────────────
+  - device_id: mock_probe_03
+    device_type: water_probe
+    adapter_id: mock-water-03
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities: []
+
+  - device_id: feeder_03
+    device_type: feeder
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.weight.read
+      - feed.hopper.status
+
+  - device_id: pump_03
+    device_type: pump
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities:
+      - pump.status.read
+      - flow_rate.read
+      - pump_pressure.read
+
+  - device_id: oxygen_supplier_03
+    device_type: oxygen_supplier
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities:
+      - oxygen.status.read
+
+  - device_id: aerator_03
+    device_type: aerator
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities:
+      - aeration.status.read
+
+  - device_id: uv_sterilizer_03
+    device_type: uv_sterilizer
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities:
+      - uv.status.read
+
+  - device_id: ozone_generator_03
+    device_type: ozone_generator
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities:
+      - ozone.status.read
+
+  - device_id: biofilter_03
+    device_type: biofilter
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities:
+      - biofilter.status.read
+
+  - device_id: photoperiod_light_03
+    device_type: photoperiod_light
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities:
+      - light.status.read
+      - photoperiod.schedule.read
+
+  - device_id: feeder_esp32_03
+    device_type: feeder
+    adapter_id: feeder_tank_03
+    location:
+      area_id: farm_dev
+      tank_id: tank_03
+      platform_tank_id: ""
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.dispense
+      - feed.set_speed
+      - feed.set_amount
+      - feed.calibrate.tare
+      - feed.calibrate.set_factor
+      - feed.read_weight
+      - feed.calibrate.cal_reset
+      - feed.calibrate.add_point
+      - feed.calibrate.cal_finalize
+      - feed.calibrate.set_linear
+      - feeder.commissioning_test
+      - feeder.status.read
+
+# ── Tank 04 ──────────────────────────────────────────────────────────────────
+  - device_id: mock_probe_04
+    device_type: water_probe
+    adapter_id: mock-water-04
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities: []
+
+  - device_id: feeder_04
+    device_type: feeder
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.weight.read
+      - feed.hopper.status
+
+  - device_id: pump_04
+    device_type: pump
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities:
+      - pump.status.read
+      - flow_rate.read
+      - pump_pressure.read
+
+  - device_id: oxygen_supplier_04
+    device_type: oxygen_supplier
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities:
+      - oxygen.status.read
+
+  - device_id: aerator_04
+    device_type: aerator
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities:
+      - aeration.status.read
+
+  - device_id: uv_sterilizer_04
+    device_type: uv_sterilizer
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities:
+      - uv.status.read
+
+  - device_id: ozone_generator_04
+    device_type: ozone_generator
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities:
+      - ozone.status.read
+
+  - device_id: biofilter_04
+    device_type: biofilter
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities:
+      - biofilter.status.read
+
+  - device_id: photoperiod_light_04
+    device_type: photoperiod_light
+    adapter_id: mock-control-01
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities:
+      - light.status.read
+      - photoperiod.schedule.read
+
+  - device_id: feeder_esp32_04
+    device_type: feeder
+    adapter_id: feeder_tank_04
+    location:
+      area_id: farm_dev
+      tank_id: tank_04
+      platform_tank_id: ""
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.dispense
+      - feed.set_speed
+      - feed.set_amount
+      - feed.calibrate.tare
+      - feed.calibrate.set_factor
+      - feed.read_weight
+      - feed.calibrate.cal_reset
+      - feed.calibrate.add_point
+      - feed.calibrate.cal_finalize
+      - feed.calibrate.set_linear
+      - feeder.commissioning_test
+      - feeder.status.read

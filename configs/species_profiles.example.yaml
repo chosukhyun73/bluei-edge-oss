@@ -1,0 +1,37 @@
+# Species profiles — per-species feeding pattern defaults + waste/excretion model.
+# 본선 사양: atlantic_salmon (대서양연어) 만. red_seabream 은 본선 외라 제거.
+# References: docs/39-multi-tank-feeder-system-design.md §1.3, §4.1.
+
+species_profiles:
+  atlantic_salmon:
+    display_name: "대서양연어"
+    lifecycle_stages:
+      fry:
+        fcr_target: 1.0
+        weight_range_g: [0, 100]
+        feed_type: fry_micropellet
+        feeding_pattern_default:
+          pulse_duration_ms: 1500
+          gap_ms: 45000
+          total_pulses: 3
+      fingerling:
+        fcr_target: 1.05
+        weight_range_g: [100, 500]
+        feed_type: fingerling_pellet
+        feeding_pattern_default:
+          pulse_duration_ms: 2000
+          gap_ms: 60000
+          total_pulses: 5
+      growout:
+        fcr_target: 1.1
+        weight_range_g: [500, 5000]
+        feed_type: growout_pellet
+        feeding_pattern_default:
+          pulse_duration_ms: 2500
+          gap_ms: 75000
+          total_pulses: 6
+    waste_model:
+      excretion_ratio: 0.30                  # 사료 → 배설물 비율
+      nh3_excretion_per_kg_feed: 35          # g/kg (D-6 입력)
+      p_excretion_per_kg_feed: 8
+      typical_consumption_window_sec: 60

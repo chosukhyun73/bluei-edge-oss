@@ -1,0 +1,6 @@
+groups:
+  - group_id: "g1"
+    name: "A동 순환시스템"
+    description: "대서양연어 RAS 양식 그룹"
+    color: "#22c55e"
+    metadata: {}

@@ -1,0 +1,7 @@
+code: ko
+name: 한국어
+english_name: Korean
+version: 1
+covers:
+  - dashboard      # → web/dashboard/src/locales/ko.json (build 시 조립)
+  - guide          # → docs/edge-service-guide 한국어판

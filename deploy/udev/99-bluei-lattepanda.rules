@@ -1,0 +1,4 @@
+# Stable symlink for LattePanda onboard Arduino Leonardo / ATmega32u4.
+# Observed on current LattePanda: idVendor=2341, idProduct=8036, /dev/ttyACM0.
+# Install only after confirming this is the sensor bridge firmware/device.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="8036", SYMLINK+="bluei-leonardo-sensor", GROUP="dialout", MODE="0660"

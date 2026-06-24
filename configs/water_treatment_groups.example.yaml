@@ -1,0 +1,29 @@
+# Water Treatment Groups (WTG) — primarily for land RAS.
+# A WTG groups tanks that share heat pump / UV / biofilter / circulation pump capacity.
+# Used by D-7 (capacity model) and C-3p (predictive water-quality gate).
+# References: docs/39-multi-tank-feeder-system-design.md §1.3, §4.2.
+
+water_treatment_groups:
+  - wtg_id: wtg_gng_01
+    site_id: gangneung_ras_01
+    name: "강릉 RAS 수처리 #1"
+    tank_ids:
+      - tank_01
+      - tank_02
+      - tank_03
+      - tank_04
+    shared_equipment:
+      heat_pump: heat_pump_01
+      uv_sterilizer: uv_01
+      circulation_pump: circulation_pump_01
+      biofilter: biofilter_01
+    intake_sensor: wq_intake_01
+    outlet_sensor: wq_outlet_01
+    capacity:
+      volume_m3: 100
+      nh3_processing_kg_per_h: 0.5    # D-7 입력
+      flow_rate_m3_per_h: 50
+    feeding_policy:
+      min_interval_between_tanks_min: 15
+      max_concurrent_tanks: 1
+      pause_on_predicted_quality_alert: true  # C-3p 연동

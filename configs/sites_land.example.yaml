@@ -1,0 +1,29 @@
+# Land-based sites (RAS).
+# Distinct from marine sites in: address-based location, water treatment groups, no tidal/weather feedback.
+# References: docs/39-multi-tank-feeder-system-design.md §1.3.
+
+sites_land:
+  - site_id: gangneung_ras_01
+    farm_id: blueocean_001
+    name: "강릉 RAS 실증센터"
+    location:
+      address: "강원특별자치도 강릉시 사천면 사천진리 ..."
+      coordinates:
+        lat: 37.806
+        lon: 128.879
+    timezone: Asia/Seoul
+    equipment_list:
+      - heat_pump_01
+      - uv_01
+      - circulation_pump_01
+      - biofilter_01
+    sensor_list:
+      - wq_intake_01
+      - wq_outlet_01
+      - wq_tank_01
+      - wq_tank_02
+      - wq_tank_03
+      - wq_tank_04
+    metadata:
+      lifecycle_mutability: false
+      source: example_config

@@ -1,0 +1,100 @@
+# Actuators — devices that effect change in the system.
+# 본선 사양: 수조별 feeder 4 (ESP32 1:1) + WTG 공유 4 (heat_pump, uv, pump, biofilter).
+# References: docs/39-multi-tank-feeder-system-design.md §1.3, §2.
+
+actuators:
+  # ── Feeders (1 ESP32 controller : 1 feeder, 수조 4기) ──
+  - device_id: feeder_tank_01
+    device_type: feeder
+    site_id: gangneung_ras_01
+    tank_id: tank_01
+    controller_id: feeder_tank_01            # 1:1 ID equality
+    position_in_tank:
+      angle_deg: 45
+      radius_m: 2.5
+      feeding_modifier: 1.0
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.dispense
+      - feed.set_speed
+      - feed.set_amount
+
+  - device_id: feeder_tank_02
+    device_type: feeder
+    site_id: gangneung_ras_01
+    tank_id: tank_02
+    controller_id: feeder_tank_02
+    position_in_tank:
+      angle_deg: 45
+      radius_m: 2.5
+      feeding_modifier: 1.0
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.dispense
+      - feed.set_speed
+      - feed.set_amount
+
+  - device_id: feeder_tank_03
+    device_type: feeder
+    site_id: gangneung_ras_01
+    tank_id: tank_03
+    controller_id: feeder_tank_03
+    position_in_tank:
+      angle_deg: 45
+      radius_m: 2.5
+      feeding_modifier: 1.0
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.dispense
+      - feed.set_speed
+      - feed.set_amount
+
+  - device_id: feeder_tank_04
+    device_type: feeder
+    site_id: gangneung_ras_01
+    tank_id: tank_04
+    controller_id: feeder_tank_04
+    position_in_tank:
+      angle_deg: 45
+      radius_m: 2.5
+      feeding_modifier: 1.0
+    capabilities:
+      - feed.start
+      - feed.stop
+      - feed.dispense
+      - feed.set_speed
+      - feed.set_amount
+
+  # ── WTG 공유 (RAS 수처리 장비) ──
+  - device_id: heat_pump_01
+    device_type: heat_pump
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    model: "DH-5010C"
+    rated_power_w: 6300
+    capabilities:
+      - heat_pump.status.read
+
+  - device_id: uv_01
+    device_type: uv_sterilizer
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    capabilities:
+      - uv.status.read
+
+  - device_id: circulation_pump_01
+    device_type: pump
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    capabilities:
+      - pump.status.read
+
+  - device_id: biofilter_01
+    device_type: biofilter
+    site_id: gangneung_ras_01
+    wtg_id: wtg_gng_01
+    capabilities:
+      - biofilter.status.read

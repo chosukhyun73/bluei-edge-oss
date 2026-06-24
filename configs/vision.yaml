@@ -1,0 +1,26 @@
+# Vision 서비스 설정
+# mode: 'sim' (시뮬레이션) | 'real' (실제 장비)
+mode: sim
+
+camera:
+  source: 0           # USB: 정수 인덱스 / IP: "rtsp://..."
+  width:  1920
+  height: 1080
+  fps:    30
+
+feeder:
+  port:     /dev/ttyUSB0
+  baudrate: 115200
+
+model:
+  weights: services/vision/models/fish_detector/weights/best.pt
+  device:  cpu         # 'cpu' | 'cuda' | 'mps'
+  conf:    0.4
+
+policy:
+  feed_threshold: 55.0   # hunger_index 급이 시작 임계값
+  feed_intensity: 0.5
+  cooldown_sec:   10.0
+  max_feed_sec:   5.0
+
+socket: /tmp/bluei-vision.sock
