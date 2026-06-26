@@ -1,0 +1,36 @@
+name: release
+
+# 태그(v*)를 push 하면 linux arm64/amd64 tarball 을 빌드해 GitHub Release 에 첨부한다.
+# modernc.org/sqlite(순수 Go)라 CGO 없이 크로스컴파일된다.
+#   예) git tag v0.2.0 && git push origin v0.2.0
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build multi-arch release tarballs
+        run: bash scripts/build-release.sh "${GITHUB_REF_NAME}"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
