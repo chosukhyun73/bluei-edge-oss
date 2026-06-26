@@ -1,7 +1,7 @@
 ---
 slug: system-operations
 title: System Operations
-order: 6
+order: 7
 summary: AI assistant, safe shutdown, offline behavior, and sync status.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

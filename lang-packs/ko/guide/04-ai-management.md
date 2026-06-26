@@ -1,7 +1,7 @@
 ---
 slug: ai-management
 title: 인공지능 관리 (AI)
-order: 4
+order: 5
 summary: 운영 정책, 추론 모니터, 현장 AI 학습, 학습된 안전 규칙을 다룹니다.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

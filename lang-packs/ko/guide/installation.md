@@ -100,4 +100,4 @@ sudo /opt/bluei-edge/deploy/install.sh -t /path/to/bluei-edge-<new-version>.tar.
 
 ---
 
-**이동:** [← 개요](00-overview.md) · [📖 목차](../index.md) · [접속 및 로그인 →](01-access-and-login.md)
+**탐색:** [← 개요](00-overview.md) · [📖 목차](../index.md) · [접속 및 로그인 →](01-access-and-login.md)

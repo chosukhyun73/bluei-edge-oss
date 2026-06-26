@@ -1,7 +1,7 @@
 ---
 slug: access-and-login
 title: Access & Login
-order: 1
+order: 2
 summary: Reach the dashboard, sign in via phone approval, and read the screen layout.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

@@ -1,7 +1,7 @@
 ---
 slug: ai-management
 title: AI Management
-order: 4
+order: 5
 summary: Operating policy, inference monitor, on-site AI training, and learned safety rules.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

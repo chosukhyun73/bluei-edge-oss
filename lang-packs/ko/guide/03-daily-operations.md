@@ -1,7 +1,7 @@
 ---
 slug: daily-operations
 title: 일상 운영
-order: 3
+order: 4
 summary: 수조를 모니터링하고 사료 사이클(자동/수동)을 실행하며 알림과 안전 게이트를 확인합니다.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

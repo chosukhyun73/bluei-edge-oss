@@ -1,7 +1,7 @@
 ---
 slug: system-operations
 title: 시스템 운영
-order: 6
+order: 7
 summary: AI 운영 도우미, 안전 종료, 오프라인 동작, 동기화 상태.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

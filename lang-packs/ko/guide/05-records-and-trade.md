@@ -1,7 +1,7 @@
 ---
 slug: records-and-trade
 title: 생산 기록 및 거래
-order: 5
+order: 6
 summary: 폐사/처치/이동 이벤트를 기록하고 입식, 출하, 서류를 관리합니다.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

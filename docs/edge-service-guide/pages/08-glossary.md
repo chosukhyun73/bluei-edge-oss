@@ -1,7 +1,7 @@
 ---
 slug: glossary
 title: Glossary
-order: 8
+order: 9
 summary: BSF, GET, density, RAS, WTG, safety gate, and other terms used in the dashboard.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

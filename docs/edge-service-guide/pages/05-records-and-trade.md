@@ -1,7 +1,7 @@
 ---
 slug: records-and-trade
 title: Production Records & Trade
-order: 5
+order: 6
 summary: Log mortality/treatment/transfer events and manage stocking, shipping, and documents.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

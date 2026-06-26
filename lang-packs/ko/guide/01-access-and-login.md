@@ -1,7 +1,7 @@
 ---
 slug: access-and-login
 title: 접속 및 로그인
-order: 1
+order: 2
 summary: 대시보드 접속, 휴대폰 승인 로그인, 화면 구성 이해.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

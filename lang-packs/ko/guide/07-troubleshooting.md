@@ -1,7 +1,7 @@
 ---
 slug: troubleshooting
 title: 문제 해결
-order: 7
+order: 8
 summary: 빈 화면, 401, 센서 미갱신, 카메라 연결 실패 등.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

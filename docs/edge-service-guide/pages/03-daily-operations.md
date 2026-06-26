@@ -1,7 +1,7 @@
 ---
 slug: daily-operations
 title: Daily Operations
-order: 3
+order: 4
 summary: Monitor tanks, run feeding cycles (auto/manual), and read alerts and the safety gate.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

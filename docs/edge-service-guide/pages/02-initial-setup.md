@@ -1,7 +1,7 @@
 ---
 slug: initial-setup
 title: Initial Setup (one-time)
-order: 2
+order: 3
 summary: Register farm, site, groups, tanks, sensors, devices, cameras, controllers, and stocking.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

@@ -1,7 +1,7 @@
 ---
 slug: glossary
 title: 용어집
-order: 8
+order: 9
 summary: BSF, GET, 밀도, RAS, WTG, 안전 게이트 등 대시보드에서 사용하는 용어.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

@@ -1,7 +1,7 @@
 ---
 slug: initial-setup
 title: 초기 설정 (최초 1회)
-order: 2
+order: 3
 summary: 농장, 사이트, 그룹, 수조, 센서, 장비, 카메라, 컨트롤러, 입식 등록.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23

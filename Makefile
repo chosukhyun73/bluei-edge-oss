@@ -40,16 +40,16 @@ build:
 	$(GO) build -ldflags='$(LDFLAGS)' -o $(BIN_DIR)/$(BIN_NAME) $(GO_PKG)
 	@echo "→ $(BIN_DIR)/$(BIN_NAME) (host)"
 
+# modernc.org/sqlite is pure Go → CGO_ENABLED=0 cross-compiles with no C toolchain.
 build-arm64:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 \
-		CC=aarch64-linux-gnu-gcc \
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
 		$(GO) build -ldflags='$(LDFLAGS)' -o $(BIN_DIR)/$(BIN_NAME)-linux-arm64 $(GO_PKG)
 	@echo "→ $(BIN_DIR)/$(BIN_NAME)-linux-arm64 (GX10 / DGX Spark target)"
 
 build-amd64:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 		$(GO) build -ldflags='$(LDFLAGS)' -o $(BIN_DIR)/$(BIN_NAME)-linux-amd64 $(GO_PKG)
 	@echo "→ $(BIN_DIR)/$(BIN_NAME)-linux-amd64"
 

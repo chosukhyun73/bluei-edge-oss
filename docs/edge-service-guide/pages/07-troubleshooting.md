@@ -1,7 +1,7 @@
 ---
 slug: troubleshooting
 title: Troubleshooting
-order: 7
+order: 8
 summary: Blank screen, 401, sensors not updating, camera connection failures, and more.
 applies_to: bluei-edge dashboard 0.1.0
 last_updated: 2026-06-23
