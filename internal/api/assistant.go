@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"bluei.kr/edge/internal/events"
+	"bluei.kr/edge/internal/knowledge"
 	"bluei.kr/edge/internal/llm"
 )
 
@@ -69,15 +71,27 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 		msgs = msgs[len(msgs)-assistantMaxTurns:]
 	}
 
+	// RAG: 마지막 운영자 질문과 관련된 지식팩 자료 검색 (best-effort).
+	query := strings.TrimSpace(req.Messages[len(req.Messages)-1].Content)
+	kbContext := s.retrieveKnowledge(r, query)
+
 	// 라이브 상태 수집 (best-effort) → 마지막 운영자 메시지에 참고 컨텍스트로 주입.
 	// (검증 전이 아니라 slice 복사 후 주입해 원본 보존)
 	contextKo := s.buildAssistantContext(r)
-	if contextKo != "" {
+	if kbContext != "" || contextKo != "" {
 		injected := append([]llm.ChatTurn(nil), msgs...)
 		li := len(injected) - 1
-		injected[li].Content = "[현재 시스템·수조 상태 — 참고용. 실시간 안전 판단은 Arbiter 가 담당하며 당신의 판단이 아닙니다]\n" +
-			contextKo +
-			"\n\n운영자 질문: " + injected[li].Content
+		var pre strings.Builder
+		if kbContext != "" {
+			pre.WriteString(kbContext)
+			pre.WriteString("\n\n")
+		}
+		if contextKo != "" {
+			pre.WriteString("[현재 시스템·수조 상태 — 참고용. 실시간 안전 판단은 Arbiter 가 담당하며 당신의 판단이 아닙니다]\n")
+			pre.WriteString(contextKo)
+			pre.WriteString("\n\n")
+		}
+		injected[li].Content = pre.String() + "운영자 질문: " + injected[li].Content
 		msgs = injected
 	}
 
@@ -104,6 +118,22 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendSSE(w, flusher, map[string]any{"done": true})
+}
+
+// retrieveKnowledge — 질의 관련 지식팩 청크를 검색해 주입용 텍스트로 만든다.
+// best-effort: retriever 미설정/빈 인덱스/오류면 빈 문자열(RAG 없이 진행).
+func (s *Server) retrieveKnowledge(r *http.Request, query string) string {
+	if s.knowledge == nil || s.knowledge.Count() == 0 || query == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	hits, err := s.knowledge.Retrieve(ctx, query)
+	if err != nil {
+		slog.Warn("assistant knowledge retrieve failed", "err", err)
+		return ""
+	}
+	return knowledge.RenderContext(hits)
 }
 
 // sendSSE — 한 SSE 이벤트("data: <json>\n\n") 를 쓰고 flush.

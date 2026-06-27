@@ -16,6 +16,7 @@ import (
 	"bluei.kr/edge/internal/config"
 	"bluei.kr/edge/internal/control"
 	"bluei.kr/edge/internal/feed_cycle"
+	"bluei.kr/edge/internal/knowledge"
 	"bluei.kr/edge/internal/llm"
 	"bluei.kr/edge/internal/runtime"
 	"bluei.kr/edge/internal/storage"
@@ -61,6 +62,7 @@ type Server struct {
 	arbiter     *arbiter.Arbiter
 	aiScheduler AISchedulerHook
 	llmClient   *llm.Client
+	knowledge   *knowledge.Retriever
 	liveWeight  LiveWeightProvider
 	httpSrv     *http.Server
 }
@@ -68,6 +70,10 @@ type Server struct {
 // SetLiveWeightProvider wires UDP live-weight cache into the API.
 // Must be called before Start.
 func (s *Server) SetLiveWeightProvider(p LiveWeightProvider) { s.liveWeight = p }
+
+// SetKnowledgeRetriever wires the RAG knowledge retriever into the assistant.
+// nil 이면 어시스턴트는 RAG 없이 동작. Must be called before Start.
+func (s *Server) SetKnowledgeRetriever(r *knowledge.Retriever) { s.knowledge = r }
 
 func NewServer(
 	cfg *config.Config,

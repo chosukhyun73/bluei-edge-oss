@@ -547,6 +547,15 @@ llm:
   # 어시스턴트 모델 GPU 상주 시간(ollama keep_alive). 비어있으면 30m, "-1"=무기한.
   assistant_keep_alive: 30m
 
+# 어시스턴트 RAG 지식팩 (옵시디언 → 컴파일 → 게이팅 배포된 rag-index.jsonl).
+# enabled=false 또는 index_path 파일이 없으면 RAG 없이 어시스턴트 동작(기존과 동일).
+# 인덱스는 별도 게이팅 배포로 설치되며, 한국어 지식엔 임베딩 bge-m3 권장.
+knowledge:
+  enabled: false
+  index_path: /var/lib/bluei-edge/knowledge/rag-index.jsonl
+  embed_model: bge-m3
+  top_k: 4
+
 # Phase G: Arbiter 환경 safety gate.
 # 모든 cycle 시작 요청은 Arbiter 를 거치며, 아래 임계 위반 시 reject.
 # 운영자 force 포함 — 어떤 의도로도 bypass 불가 (어체 생존 임계).

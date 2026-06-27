@@ -72,6 +72,12 @@ firmware/legacy-esp32-backups/*.bin
 # llm-wiki 자동 생성 reference audit / scout-gap 산출물 (6시간 주기)
 local-ai/llm-wiki/reports/reference-audits/
 
+# 옵시디언 추출 staging (사적 지식 가능 — 커밋 금지, 검토 후 컴파일)
+local-ai/llm-wiki/inbox/bluei-kb-staging/
+
+# 컴파일된 지식팩(게이팅 배포 아티팩트 — 커밋 금지, 별도 게이팅 허브로 발행)
+local-ai/llm-wiki/compiled/bluei-kb/
+
 # Tauri 자동 생성 산물 (schemas 등)
 web/dashboard/src-tauri/gen/
 

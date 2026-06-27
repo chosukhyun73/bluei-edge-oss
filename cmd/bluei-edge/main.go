@@ -26,6 +26,7 @@ import (
 	"bluei.kr/edge/internal/events"
 	"bluei.kr/edge/internal/feed_cycle"
 	"bluei.kr/edge/internal/inference"
+	"bluei.kr/edge/internal/knowledge"
 	"bluei.kr/edge/internal/learned_safety"
 	"bluei.kr/edge/internal/llm"
 	"bluei.kr/edge/internal/predictive"
@@ -779,6 +780,23 @@ func runCmd(args []string) {
 	}
 
 	apiSrv := api.NewServer(cfg, app, store, colSvc, ctrlSvc, syncSvc, fcWorker, arb, aiScheduler, llmClient)
+
+	// 어시스턴트 RAG 지식팩 적재 (best-effort). 임베딩에 LLM client 필요.
+	// 인덱스(rag-index.jsonl)는 게이팅 배포로 기기에 설치됨. 없거나 실패하면 RAG 없이 동작.
+	if cfg.Knowledge.Enabled && llmClient != nil && cfg.Knowledge.IndexPath != "" {
+		if chunks, err := knowledge.Load(cfg.Knowledge.IndexPath); err != nil {
+			slog.Warn("knowledge index load failed — assistant RAG disabled",
+				"path", cfg.Knowledge.IndexPath, "err", err)
+		} else {
+			embedModel := cfg.Knowledge.EmbedModel
+			embed := func(ctx context.Context, text string) ([]float64, error) {
+				return llmClient.Embed(ctx, embedModel, text)
+			}
+			apiSrv.SetKnowledgeRetriever(knowledge.New(chunks, embed, cfg.Knowledge.TopK))
+			slog.Info("assistant RAG knowledge loaded",
+				"chunks", len(chunks), "embed_model", embedModel, "path", cfg.Knowledge.IndexPath)
+		}
+	}
 
 	// Baseline worker — Cage/Tank별 anomaly score 주기 평가 (docs/29 Phase 1.5)
 	baselineScorer := baseline.NewScorer(cfg.Storage.SQLitePath)

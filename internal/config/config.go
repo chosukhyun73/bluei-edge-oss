@@ -36,8 +36,19 @@ type Config struct {
 	EnvironmentalSafety  EnvironmentalSafetyConfig `yaml:"environmental_safety"`
 	Schedule             ScheduleConfig            `yaml:"schedule"`
 	LLM                  LLMConfig                 `yaml:"llm"`
+	Knowledge            KnowledgeConfig           `yaml:"knowledge"`
 	Arbiter              ArbiterConfig             `yaml:"arbiter"`
 	Retention            RetentionConfig           `yaml:"retention"`
+}
+
+// KnowledgeConfig — 어시스턴트 RAG 지식팩 설정.
+// 인덱스(rag-index.jsonl)는 별도 게이팅 배포로 기기에 설치되며, 여기서 경로만 가리킨다.
+// enabled=false 또는 인덱스 파일이 없으면 RAG 없이 동작(기존 어시스턴트 그대로).
+type KnowledgeConfig struct {
+	Enabled    bool   `yaml:"enabled"`     // false 면 RAG 비활성
+	IndexPath  string `yaml:"index_path"`  // 예) /var/lib/bluei-edge/knowledge/rag-index.jsonl
+	EmbedModel string `yaml:"embed_model"` // 예) bge-m3 (다국어). 비어있으면 bge-m3
+	TopK       int    `yaml:"top_k"`       // 주입할 청크 수. 0 → 4
 }
 
 // RetentionConfig — 고용량 telemetry 이벤트의 보관기간 정책.

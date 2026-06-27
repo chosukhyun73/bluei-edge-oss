@@ -237,6 +237,51 @@ func (c *Client) ChatStream(ctx context.Context, model, keepAlive string, messag
 	return content, nil
 }
 
+// embedResponse — ollama /api/embeddings 응답.
+type embedResponse struct {
+	Embedding []float64 `json:"embedding"`
+}
+
+// Embed — 텍스트를 임베딩 벡터로 변환한다 (RAG 검색용).
+// model 이 비어있으면 "bge-m3"(다국어). ollama /api/embeddings 사용.
+func (c *Client) Embed(ctx context.Context, model, text string) ([]float64, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, errors.New("llm: empty embed text")
+	}
+	if model == "" {
+		model = "bge-m3"
+	}
+	bb, err := json.Marshal(map[string]any{"model": model, "prompt": text})
+	if err != nil {
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/api/embeddings", bytes.NewReader(bb))
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(buf)))
+	}
+	var er embedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+	if len(er.Embedding) == 0 {
+		return nil, errors.New("llm: empty embedding")
+	}
+	return er.Embedding, nil
+}
+
 func confidenceOf(a *Analysis) float64 {
 	if a == nil {
 		return 0
