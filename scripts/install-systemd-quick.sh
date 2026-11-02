@@ -16,7 +16,6 @@ set -euo pipefail
 
 ROOT=/home/bluei/projects/bluei-edge
 RUN_USER=bluei
-TOKEN="${BLUEI_EDGE_OPERATOR_TOKEN:-qrbqWR8mEJgYTJmwwBFVa55HMImJG1TwAdJn1S1uFl4}"
 UNIT=/etc/systemd/system/bluei-edge.service
 ENV_DIR=/etc/bluei-edge
 ENV_FILE="$ENV_DIR/env"
@@ -28,6 +27,17 @@ fi
 if [ ! -x "$ROOT/bin/bluei-edge" ]; then
   echo "바이너리 없음: $ROOT/bin/bluei-edge — 먼저 빌드(go build -o bin/bluei-edge ./cmd/bluei-edge)" >&2
   exit 2
+fi
+
+# 운영자 토큰: 환경변수 > 기존 env 파일 값(재실행해도 ESP32 등 기존 장비 설정 유지) > 새 무작위 생성.
+# 저장소에 기본 토큰을 두지 않는다(공개 저장소 유출 방지).
+TOKEN="${BLUEI_EDGE_OPERATOR_TOKEN:-}"
+if [ -z "$TOKEN" ] && [ -f "$ENV_FILE" ]; then
+  TOKEN="$(sed -n 's/^BLUEI_EDGE_OPERATOR_TOKEN=//p' "$ENV_FILE" | head -1)"
+fi
+if [ -z "$TOKEN" ]; then
+  TOKEN="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p | tr -d '\n')"
+  echo "→ 새 운영자 토큰 생성 — 값은 $ENV_FILE 에서 확인 (ESP32 secrets.h 에 같은 값 설정)"
 fi
 
 echo "[1/6] 운영자 토큰 env 파일 작성: $ENV_FILE (600)"

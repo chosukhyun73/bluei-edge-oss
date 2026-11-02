@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"net/http"
+
+	"bluei.kr/edge/internal/config"
 )
 
 // siteIdentity — GX10이 보유한 사업장/farm-site 정체성. edge.db 등록 site/farm을
@@ -65,8 +67,17 @@ func (s *Server) readSiteIdentity(ctx context.Context) siteIdentity {
 
 // handlePair — GET /v1/pair. bluei 앱이 스캔할 페어링 QR 페이로드를 반환한다.
 // node_code/access_token은 config.ApplyPairCreds(시작 시)가 채운 cfg.Sync에서,
-// site 정보는 cfg.Site에서 가져온다. 인증 없음(페어링 부트스트랩, 로컬 대시보드용).
+// site 정보는 cfg.Site에서 가져온다. 운영자 인증(authMiddleware) 뒤에서만 제공한다.
+// device-auth 로 이미 등록된 기기는 QR 이 필요 없으므로 클라우드 토큰을 내보내지 않는다.
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
+	if dc, err := config.LoadDeviceCreds(s.cfg.Edge.DataDir); err == nil && dc.AccessToken != "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"kind":      "gx10_pair",
+			"node_code": s.cfg.Sync.NodeCode,
+			"paired":    true,
+		})
+		return
+	}
 	endpoint := "https://api.bluei.kr/gx10/sync/batches"
 	if s.cfg.Sync.Endpoint != nil && *s.cfg.Sync.Endpoint != "" {
 		endpoint = *s.cfg.Sync.Endpoint

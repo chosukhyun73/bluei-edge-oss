@@ -26,7 +26,11 @@ BACKEND_LOG=/tmp/bluei-edge.log
 
 # 백엔드와 vite 프록시가 같은 operator token 을 써야 /v1/* 인증이 통과한다.
 # (vite.config.ts 가 이 토큰을 Bearer 로 자동 주입.)
-: "${BLUEI_EDGE_OPERATOR_TOKEN:=qrbqWR8mEJgYTJmwwBFVa55HMImJG1TwAdJn1S1uFl4}"
+# 저장소에 토큰을 두지 않는다: 환경변수 > /etc/bluei-edge/env > 이 세션용 무작위 값.
+if [ -z "${BLUEI_EDGE_OPERATOR_TOKEN:-}" ] && [ -r /etc/bluei-edge/env ]; then
+  BLUEI_EDGE_OPERATOR_TOKEN="$(sed -n 's/^BLUEI_EDGE_OPERATOR_TOKEN=//p' /etc/bluei-edge/env | head -1)"
+fi
+: "${BLUEI_EDGE_OPERATOR_TOKEN:=$(openssl rand -hex 32)}"
 export BLUEI_EDGE_OPERATOR_TOKEN
 
 if [ ! -x "$TAURI_BIN" ]; then

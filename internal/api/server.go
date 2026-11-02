@@ -104,8 +104,8 @@ func NewServer(
 	mux.HandleFunc("/healthz", method(http.MethodGet, s.handleHealthz))
 	mux.HandleFunc("/readyz", method(http.MethodGet, s.handleReadyz))
 	mux.HandleFunc("/v1/status", method(http.MethodGet, s.handleStatus))
-	// 페어링 QR 페이로드 — 인증 없음(앱이 스캔하기 전 부트스트랩, 로컬 대시보드용).
-	mux.HandleFunc("/v1/pair", method(http.MethodGet, s.handlePair))
+	// 페어링 QR 페이로드 — 클라우드 sync 토큰을 담으므로 운영자 인증 필요(대시보드는 프록시가 Bearer 주입).
+	mux.HandleFunc("/v1/pair", method(http.MethodGet, s.authMiddleware(s.handlePair)))
 	// Device auth (login bootstrap·session) — 폰 푸시 승인 device-login 흐름. 무인증(부트스트랩).
 	mux.HandleFunc("/v1/device/login/start", method(http.MethodPost, s.handleDeviceLoginStart))
 	mux.HandleFunc("/v1/device/login/status", method(http.MethodGet, s.handleDeviceLoginStatus))
