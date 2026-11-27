@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, X, Pencil, Trash2 } from 'lucide-react';
 import type { BroodstockCohort, NewBroodstockBody, BroodstockOrigin, Tank } from '../lib/types';
 import { Broodstock, ApiError } from '../lib/api';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 import { ConfirmDialog } from './ui/confirm-dialog';
 
 interface Props {

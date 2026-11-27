@@ -1,0 +1,11 @@
+id: fsma204
+name: FSMA 204 (미국)
+version: 21 CFR 1 Subpart S
+checked_at: "2026-11-17"
+min_retention_years: 2
+items:
+  - {id: retention, title: 기록을 2년 이상 보관한다, clause: 21 CFR 1.1455, required: true, check: retention}
+  - {id: transformation, title: 가공 기록(투입 lot 코드·사용량·새 lot 코드·장소·완료일·수량), clause: 21 CFR 1.1350, required: true, check: later}
+  - {id: ship_receive, title: 수령·출하 기록, clause: 21 CFR 1.1340·1.1345, required: true, check: later}
+  - {id: spreadsheet, title: 요청 24시간 안에 정렬 가능한 스프레드시트를 낸다, clause: 21 CFR 1.1455, required: true, check: manual, note: app.bluei.kr 의 FSMA 204 엑셀로 낸다}
+  - {id: plan, title: 추적 계획 문서, required: true, check: manual}

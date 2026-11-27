@@ -1,0 +1,27 @@
+[Unit]
+Description=bluei-lrcn — LRCN feeding-activity inference server (port 8081, /opt install)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bluei-edge
+# repo root 필수 — server.py 의 manifest hot-reload 경로가 상대경로
+# (local-ai/models/active/manifest.json).
+WorkingDirectory=/opt/bluei-edge
+# 씨앗(blueocean-baseline)은 tarball 로 이식됨. 현장 학습 promote 시 active manifest 가
+# hot-reload 로 이 씨앗을 대체한다.
+Environment=LRCN_WEIGHTS_REACTION=/opt/bluei-edge/local-ai/models/blueocean-baseline/bootstrap-2026-05-21-blueocean-final.pt
+Environment=LRCN_WEIGHTS_BASELINE=/opt/bluei-edge/local-ai/models/blueocean-baseline/bootstrap-2026-05-21-blueocean-final.pt
+# --device 는 setup-lrcn.sh 가 설치 시 cuda/cpu 로 치환한다.
+ExecStart=/opt/bluei-edge/local-ai/venv/bin/python -m services.lrcn.server --port 8081 --device cuda
+Restart=always
+RestartSec=5s
+# 메모리 백스톱 — 재발성 디코드 누적 시 시스템 OOM 전에 이 유닛만 kill+재기동.
+MemoryMax=24G
+TimeoutStopSec=20s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

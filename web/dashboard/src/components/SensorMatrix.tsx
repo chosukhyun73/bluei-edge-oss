@@ -4,8 +4,8 @@ import {
   ReferenceArea,
 } from 'recharts';
 import type { StateVector, Tank, TargetRange } from '../lib/types';
-import { relativeTime } from '../lib/format';
-import { useLanguage } from '../lib/language-context';
+import { relativeTime, dateLocale } from '../lib/format';
+import { useLanguage } from '../lib/language-core';
 
 // 핵심 수질 6개 — 운영자가 동시에 비교 보고 싶어하는 metric.
 // (carbon_dioxide/nitrate 등은 expanded 표 fallback 으로.)
@@ -66,7 +66,7 @@ type SeriesPoint = {
 };
 
 function hhmm(d: Date): string {
-  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
 }
 
 // 단일 tank 의 target_ranges 에서 metric range 추출 (시각 보조용).
@@ -140,7 +140,8 @@ export function SensorMatrix({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {PRIMARY_METRICS.map(m => (
+          {/* 실제 센서 데이터가 있는 지표만 렌더 — 센서 없는 지표(목업)는 카드 자체를 숨김. */}
+          {PRIMARY_METRICS.filter(m => (bufferRef.current.get(m.key)?.length ?? 0) > 0).map(m => (
             <MetricChart
               key={m.key}
               metricKey={m.key}

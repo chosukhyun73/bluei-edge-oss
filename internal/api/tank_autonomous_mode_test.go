@@ -95,17 +95,17 @@ func TestPostTankAutonomousModeInvalidMode(t *testing.T) {
 	}
 }
 
-// TestPostTankAutonomousModeMissingReason — observation 이지만 reason 없음 → 422 MISSING_REASON.
-func TestPostTankAutonomousModeMissingReason(t *testing.T) {
-	s := newTestServer(t)
+// TestPostTankAutonomousModeReasonOptional — reason 없이도 자율 승격 적용 (사유 optional, 2026-07-21).
+func TestPostTankAutonomousModeReasonOptional(t *testing.T) {
+	s := newTestServerWithApp(t)
 	w := postAutoMode(t, s, "tank_01", "partial", "", "op")
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	if errObj, _ := resp["error"].(map[string]any); errObj["code"] != "MISSING_REASON" {
-		t.Errorf("expected MISSING_REASON error code, got %v", resp)
+	if resp["ok"] != true {
+		t.Errorf("expected ok=true: %v", resp)
 	}
 }
 

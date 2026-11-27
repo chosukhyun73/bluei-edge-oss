@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
+import { dateLocale } from '../../lib/format';
 import type { Farm, Site, WaterTreatmentGroup, Actuator, Sensor, Tank, PredictiveForecast, OperatorIntent } from '../../lib/types';
 import { Farms, Sites, WTGs, Actuators, SensorDevices, Tanks, Predictive, OperatorIntents } from '../../lib/api';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
 import { EnvironmentalCard } from './EnvironmentalCard';
 import { InlineSensorForm, InlineActuatorForm, InlineWtgForm } from '../sections/TankSettingsSection';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -404,7 +405,7 @@ function WTGDetail({ wtg }: WTGDetailProps) {
                 <div className="flex items-center gap-2 mb-0.5">
                   <span className="text-blue-400 font-mono text-[10px]">{intent.intent_type}</span>
                   <span className="text-gray-600 font-mono text-[10px]">
-                    {new Date(intent.recorded_at).toLocaleString('ko-KR', {
+                    {new Date(intent.recorded_at).toLocaleString(dateLocale(), {
                       month: '2-digit', day: '2-digit',
                       hour: '2-digit', minute: '2-digit',
                     })}

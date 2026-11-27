@@ -5,7 +5,7 @@ import type { ArbiterDecision, ArbiterPriority } from '../../lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Skeleton } from '../ui/skeleton';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // C-4: Arbiter 결정 audit 로그.
 // 5-G Progressive Autonomy 의 priority(manual_override / ai_advisory / ai_autonomous)

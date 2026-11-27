@@ -8,7 +8,7 @@ import (
 )
 
 func TestSpawnBatchCRUD(t *testing.T) {
-	store := openTestStore(t)
+	store := openHatcheryTestStore(t)
 	ctx := context.Background()
 
 	b := &storage.SpawnBatch{

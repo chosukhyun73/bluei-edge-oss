@@ -3,10 +3,11 @@ import { Play, Square, Bot, Hand } from 'lucide-react';
 import type { FeedCycle, Tank, LLMAnalysis } from '../../lib/types';
 import { FeedCycles, OperatorIntents } from '../../lib/api';
 import { Button } from '../ui/button';
-import { computeFeedingPolicy, BSF_MODE_LABEL } from '../../lib/species-policy';
+import { computeFeedingPolicy, BSF_MODE_LABEL, feedingWeightG } from '../../lib/species-policy';
 import { getEffectiveTankPolicy } from '../../lib/feeding-policy-store';
 import { LLMAnalysisModal } from './LLMAnalysisModal';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
+import { useLiveTemps } from '../../lib/use-live-temps';
 
 type Variant = 'mini' | 'compact' | 'full';
 
@@ -14,6 +15,8 @@ type FeedQuickControlProps = {
   tank: Tank;
   variant?: Variant;
   onChanged?: () => void;
+  // 즉시 실행 모드(카메라 확대뷰) — LLM 종합판단 생략, 클릭 즉시 사이클 시작.
+  immediate?: boolean;
 };
 
 function fmtAge(startedAt: string, tr: (k: string, v?: Record<string, string | number>) => string): string {
@@ -23,8 +26,9 @@ function fmtAge(startedAt: string, tr: (k: string, v?: Record<string, string | n
   return tr('feedQuick.ageHoursMinutes', { h: Math.floor(ms / 3_600_000), m: Math.floor((ms % 3_600_000) / 60_000) });
 }
 
-export function FeedQuickControl({ tank, variant = 'compact', onChanged }: FeedQuickControlProps) {
+export function FeedQuickControl({ tank, variant = 'compact', onChanged, immediate = false }: FeedQuickControlProps) {
   const { tr } = useLanguage();
+  const liveTemps = useLiveTemps();
   const [activeCycle, setActiveCycle] = useState<FeedCycle | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,11 +64,12 @@ export function FeedQuickControl({ tank, variant = 'compact', onChanged }: FeedQ
   const computation = computeFeedingPolicy({
     species: tank.species,
     fish_count: tank.fish_count ?? null,
-    avg_weight_g: tank.avg_weight_g ?? null,
+    avg_weight_g: feedingWeightG(tank),
     volume_m3: tank.volume_m3 ?? null,
     bsf_mode: effective.bsf_mode,
-    temperature_c: null,
+    temperature_c: liveTemps[tank.tank_id] ?? null,
     max_daily_cycles: effective.max_daily_cycles,
+    daily_cycles: effective.daily_cycles,
   });
 
   const blocked = computation.block_reason != null;
@@ -74,15 +79,37 @@ export function FeedQuickControl({ tank, variant = 'compact', onChanged }: FeedQ
     setBusy(true);
     setError(null);
     try {
-      // 운영자 의도 자동 기록 (수조 화면에서 트리거 = quick action)
-      setLlmModal({ intentId: '', analysis: null });
+      // immediate 경로의 중복 급이 가드 — LLM 검수를 뺀 자리의 원래 목적(누가 방금 줬는데
+      // 또 주는 것 방지)을 기록 기반으로 즉시 확인. 최근 1시간 내 급이가 있으면 확인 팝업.
+      if (immediate) {
+        const recent = await FeedCycles.listForTank(tank.tank_id, 20);
+        const now = Date.now();
+        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        const todayG = recent.items
+          .filter(c => new Date(c.started_at).getTime() >= todayStart.getTime())
+          .reduce((s, c) => s + (c.total_amount_g ?? 0), 0);
+        const last = recent.items.find(c => c.completed_at);
+        const lastMs = last?.completed_at ? now - new Date(last.completed_at).getTime() : Infinity;
+        if (lastMs < 60 * 60_000) {
+          const ok = window.confirm(tr('feedQuick.duplicateGuard', {
+            min: Math.max(1, Math.round(lastMs / 60_000)),
+            g: Math.round(last?.total_amount_g ?? 0),
+            today: Math.round(todayG),
+          }));
+          if (!ok) { setBusy(false); return; }
+        }
+      }
+      // 운영자 의도 자동 기록 (수조 화면에서 트리거 = quick action).
+      // immediate(카메라 뷰): LLM 종합판단 생략 — 클릭 즉시 사이클 시작 (2026-07-04 유령급이 방지).
+      if (!immediate) setLlmModal({ intentId: '', analysis: null });
       const intent = await OperatorIntents.create({
         tank_id: tank.tank_id,
         intent_type: 'feed_now',
         reason: tr('feedQuick.quickStartReason', { policy: tr(BSF_MODE_LABEL[effective.bsf_mode]) }),
+        ...(immediate ? { skip_llm: true } : {}),
       });
       // F.2 — LLM 분석이 있으면 modal 표시
-      setLlmModal(intent.llm_analysis ? { intentId: intent.intent_id, analysis: intent.llm_analysis } : null);
+      if (!immediate) setLlmModal(intent.llm_analysis ? { intentId: intent.intent_id, analysis: intent.llm_analysis } : null);
       await FeedCycles.start({
         tank_id: tank.tank_id,
         mode: 'adaptive',
@@ -91,6 +118,9 @@ export function FeedQuickControl({ tank, variant = 'compact', onChanged }: FeedQ
           target_amount_g: computation.cycle_target_amount_g ?? 50,
           max_pulses: computation.feeding_pattern_default?.total_pulses,
           max_duration_min: computation.max_duration_min ?? 10,
+          // onoff_feeder(on/off): run/stop 초로 마이크로펄스 도출(ESP32는 무시). 그룹정책 값.
+          run_sec: effective.feeder_run_sec,
+          stop_sec: effective.feeder_stop_sec,
           // Phase B: 단계 기반 ESP32 모터 출력 (살포 rpm / 공급 amount). null 이면 펌웨어 default.
           ...(computation.speed_rpm != null ? { speed_rpm: computation.speed_rpm } : {}),
           ...(computation.amount != null ? { amount: computation.amount } : {}),
@@ -98,6 +128,7 @@ export function FeedQuickControl({ tank, variant = 'compact', onChanged }: FeedQ
       });
       onChanged?.();
     } catch (err) {
+      setLlmModal(null); // 판단 실패/중단 시 loading 모달이 갇히지 않게 닫는다
       setError(err instanceof Error ? err.message : tr('feedQuickControl.errorStart'));
     } finally {
       setBusy(false);
@@ -202,27 +233,38 @@ export function FeedQuickControl({ tank, variant = 'compact', onChanged }: FeedQ
     return (
       <>
         {llmModalEl}
-      <div className="flex items-center gap-2 px-2.5 py-1.5 bg-gray-800/40 border border-gray-700/40 rounded text-xs">
-        <Hand className="w-3 h-3 text-gray-500 flex-shrink-0" />
-        <div className="flex-1 min-w-0">
-          {blocked ? (
-            <span className="text-red-400">{tr('feedQuickControl.blockedDensity')}</span>
-          ) : (
-            <span className="text-gray-400">
-              {tr(BSF_MODE_LABEL[effective.bsf_mode])} · {computation.cycle_target_amount_g ?? '—'}g/cycle
-            </span>
-          )}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-gray-800/40 border border-gray-700/40 rounded text-xs">
+          <Hand className="w-3 h-3 text-gray-500 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            {blocked ? (
+              <span className="text-red-400">{tr('feedQuickControl.blockedDensity')}</span>
+            ) : (
+              <span className="text-gray-400">
+                {tr(BSF_MODE_LABEL[effective.bsf_mode])} · {computation.cycle_target_amount_g ?? '—'}g/cycle
+              </span>
+            )}
+          </div>
+          <Button
+            size="sm"
+            disabled={busy || blocked || !computation.cycle_target_amount_g}
+            onClick={handleStart}
+            className="h-6 px-2 text-xs"
+          >
+            <Play className="w-3 h-3 mr-1" />
+            {tr('feedQuickControl.start')}
+          </Button>
+          {error && <span className="text-xs text-red-400 ml-2">{error}</span>}
         </div>
-        <Button
-          size="sm"
-          disabled={busy || blocked || !computation.cycle_target_amount_g}
-          onClick={handleStart}
-          className="h-6 px-2 text-xs"
-        >
-          <Play className="w-3 h-3 mr-1" />
-          {tr('feedQuickControl.start')}
-        </Button>
-        {error && <span className="text-xs text-red-400 ml-2">{error}</span>}
+        {!blocked && computation.get80_h != null && (
+          <div className="px-2.5 flex items-center gap-x-2.5 gap-y-0.5 flex-wrap text-[11px] text-gray-500 font-mono">
+            <span title={tr('feedQuickControl.planDigestTip')}>GET {computation.get95_h?.toFixed(1)}h</span>
+            <span className="text-gray-600">·</span>
+            <span title={tr('feedQuickControl.planRefeedTip')}>{tr('feedQuickControl.planRefeed')} {computation.get80_h.toFixed(1)}h</span>
+            <span className="text-gray-600">·</span>
+            <span title={tr('feedQuickControl.planCyclesTip')}>{tr('feedQuickControl.planCyclesPerDay', { n: computation.daily_cycles ?? '—' })}</span>
+          </div>
+        )}
       </div>
       </>
     );

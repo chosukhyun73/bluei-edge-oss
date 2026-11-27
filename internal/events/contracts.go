@@ -21,6 +21,9 @@ const (
 	EventVisionTrainingJobUpdate      = "vision.training.job.update"
 	EventVisionAlgorithmApplied       = "vision.algorithm.applied"
 	EventVisionBootstrapLabelRecorded = "vision.bootstrap.label.recorded"
+	EventVisionSegmentLabelRecorded   = "vision.segment.label.recorded"
+	EventVisionSegmentScoresRecorded  = "vision.segment.model_scores.recorded"
+	EventFloorStillLabelRecorded      = "vision.floor_still.label.recorded"
 	EventTankBaselineScored           = "tank.baseline.scored"
 	EventTankTransitionDetected       = "tank.transition.detected"
 	EventWaterForecastRecorded        = "water.forecast.recorded"
@@ -50,6 +53,20 @@ const (
 	EventSiteStockingRecorded = "site.stocking.recorded"
 	EventSiteHarvestRecorded  = "site.harvest.recorded"
 
+	// 가공공장 HACCP 계획 버전 게시 — docs/54
+	EventHACCPPlanPublished = "haccp.plan.published"
+	// 가공공장 생산 실행 — docs/54 §26
+	EventProcessLotStarted      = "process.lot.started"
+	EventProcessLotClosed       = "process.lot.closed"
+	EventProcessLotReviewed     = "process.lot.reviewed"
+	EventHACCPDeviationDetected = "haccp.deviation.detected"
+	EventHACCPDeviationClosed   = "haccp.deviation.closed"
+	EventHACCPDocumentIssued    = "haccp.document.issued"
+
+	// 설정 변경 이력 — 그룹(급이 모드·횟수·점등창 등) / 수조 급이정책 덮어쓰기
+	EventGroupProfileChanged      = "group.profile.changed"
+	EventTankFeedingPolicyChanged = "tank.feeding_policy.changed"
+
 	// Feed cycle events (Phase 3)
 	EventFeedCycleStarted   = "feed.cycle.started"
 	EventFeedCycleCompleted = "feed.cycle.completed"
@@ -57,6 +74,11 @@ const (
 	EventFeedPulseCompleted = "feed.pulse.completed"
 	EventFeedGapStarted     = "feed.gap.started"
 	EventFeedGapCompleted   = "feed.gap.completed"
+	// 사이클 완료 자동 보고 — 사이클 사실 + 비전 결과(LRCN·요동곡선) 종합 1건 (2026-07-05)
+	EventFeedCycleReport = "feed.cycle.report"
+	// 사이클 통째 무배출 의심 — 펄스 열과 요동 봉우리 열의 일치도가 임계 미만 (2026-07-29).
+	// 관측·경보 전용이며 급이 실행에는 개입하지 않는다.
+	EventFeedCyclePatternWeak = "feed.cycle.pattern_weak"
 
 	// Arbiter preemption events (Phase 6)
 	EventFeedCyclePreempted = "feed.cycle.preempted"
@@ -65,6 +87,16 @@ const (
 	EventFeedPulseWeight      = "feed.pulse.weight"
 	EventFeedSiloDepletion    = "feed.silo.depletion"
 	EventFeedOverflowDetected = "feed.overflow.detected"
+
+	// 외부 환경 데이터 (2026-07-17): NIFS 연안 수온 등 — 수취구 권역 추세 비교·
+	// 센서 교차검증·수온 보정의 재료. retention 규칙 미대상 = 장기 보존.
+	EventExternalEnvRecorded = "external.env.recorded"
+
+	// 호퍼 잔량 원장 (2026-07-17 tank_02 사료 소진 사태 재발 방지)
+	EventFeederHopperRefilled       = "feeder.hopper.refilled"        // 운영자 보충 기록
+	EventFeederHopperRecalibrated   = "feeder.hopper.recalibrated"    // 운영자 실측 재보정 (원장 기준선 재설정)
+	EventFeederHopperLow            = "feeder.hopper.low"             // 추정 잔량 임계 미만
+	EventFeederHopperEmptySuspected = "feeder.hopper.empty_suspected" // 무배출 연쇄 + 잔량 부족
 )
 
 const (
@@ -85,6 +117,9 @@ const (
 	MetricPumpPressure         = "pump_pressure"
 	MetricFeedWeight           = "feed_weight"
 	MetricLightIntensity       = "light_intensity"
+	MetricChillerCurrent       = "chiller_current_a" // 냉각기 전류(A)
+	MetricChillerPower         = "chiller_power_kw"  // 냉각기 파생 전력(kW)
+	MetricChillerStatus        = "chiller_status"    // 냉각기 on/off (1/0)
 	MetricUnknown              = "unknown"
 )
 
@@ -423,11 +458,28 @@ type VisionObservationDisputedPayload struct {
 	Verdict       string   `json:"verdict"` // correct | wrong | unsure
 	Reason        string   `json:"reason,omitempty"`
 	OperatorScore *float64 `json:"operator_score,omitempty"` // G-4: 단일 슬라이더 (legacy)
-	PreScore      *float64 `json:"pre_score,omitempty"`      // R5: 급이 전 안정성 0~1
-	DuringScore   *float64 `json:"during_score,omitempty"`   // R5: 급이 도중 반응 0~1
-	ClipRef       string   `json:"clip_ref,omitempty"`       // R5: 라벨 영상 mp4 path (observation 정합)
-	AlgorithmID   string   `json:"algorithm_id,omitempty"`   // R11: 어느 LRCN 모델용 라벨인지 추적
-	DisputedAt    string   `json:"disputed_at"`
+	// AIScore — 제출 시점 모달에 프리필된 AI 점수(r3 펄스평균 우선, 통클립 폴백).
+	// operator_score 와의 격차(|op-ai|)가 AI↔운영자 수렴 지표의 원천 (2026-07-21).
+	AIScore     *float64 `json:"ai_score,omitempty"`
+	PreScore    *float64 `json:"pre_score,omitempty"`    // R5: 급이 전 안정성 0~1
+	DuringScore *float64 `json:"during_score,omitempty"` // R5: 급이 도중 반응 0~1
+	ClipRef     string   `json:"clip_ref,omitempty"`     // R5: 라벨 영상 mp4 path (observation 정합)
+	AlgorithmID string   `json:"algorithm_id,omitempty"` // R11: 어느 LRCN 모델용 라벨인지 추적
+	// 운영자 실배출 관찰 (2026-07-17): full|partial|none — discharge_check 판정의
+	// ground truth (거짓 no 문제의 정답 데이터).
+	OperatorDischarge string `json:"operator_discharge,omitempty"`
+	// PrefillModified — 운영자가 AI 프리필 점수를 실제로 고쳤는가 (2026-07-23).
+	// false = 프리필 그대로 수락 → 독립 라벨이 아니며, 학습에 쓰면 모델이 자기 출력을
+	// 재학습해 편향·압축이 자기강화된다. 카메라별 편향 보정값 적합에서도 제외해야
+	// 과소교정을 피한다. nil = 미기록(이 필드 도입 전 라벨).
+	// 값 비교(operator_score==ai_score)로는 우연 일치와 구분이 안 돼 별도 기록한다.
+	PrefillModified *bool `json:"prefill_modified,omitempty"`
+	// DischargeModified — 운영자가 펄스별 배출 ✓/✗ 프리필을 실제로 고쳤는가 (2026-07-30).
+	// PrefillModified 는 점수 슬라이더만 추적하므로, 배출 라벨의 독립성은 이 값으로 본다.
+	// false = 시스템 판정을 그대로 수락 → 배출 라벨을 판정 검증에 쓰면 순환논리가 된다
+	// (실측: 2026-07-30 14:00 tank_02 건이 판별 불가였다). nil = 미기록.
+	DischargeModified *bool  `json:"discharge_modified,omitempty"`
+	DisputedAt        string `json:"disputed_at"`
 }
 
 func (p VisionObservationDisputedPayload) Validate() error {
@@ -455,8 +507,141 @@ func (p VisionObservationDisputedPayload) Validate() error {
 	if p.DuringScore != nil && (*p.DuringScore < 0 || *p.DuringScore > 1) {
 		return errors.New("during_score must be between 0 and 1")
 	}
+	if p.OperatorDischarge != "" && p.OperatorDischarge != "full" &&
+		p.OperatorDischarge != "partial" && p.OperatorDischarge != "none" {
+		return fmt.Errorf("invalid operator_discharge: %s", p.OperatorDischarge)
+	}
 	if _, err := time.Parse(time.RFC3339Nano, p.DisputedAt); err != nil {
 		return fmt.Errorf("disputed_at must be RFC3339/RFC3339Nano: %w", err)
+	}
+	return nil
+}
+
+// VisionSegmentLabelPayload — 펄스 사이클 세그먼트별 사료반응 라벨 (docs/50 3단계).
+//
+// 한 이벤트 = 한 클립(카메라)의 전 펄스 세그먼트 라벨 묶음. 통클립 1점(legacy dispute)
+// 대신 펄스 단위로 저장 → LRCN A1 먹이반응 학습쌍 + 실시간 중단 판단용. 4단계 manifest
+// export 의 소스. 세그먼트 오프셋은 원본 clip 대비(오프셋 참조 — 물리 분할 없음).
+type VisionSegmentLabelPayload struct {
+	LabelID     string         `json:"label_id"`
+	CycleID     string         `json:"cycle_id"`
+	ClipID      string         `json:"clip_id"`
+	CameraID    string         `json:"camera_id"`
+	TankID      string         `json:"tank_id,omitempty"`
+	OperatorID  string         `json:"operator_id"`
+	AlgorithmID string         `json:"algorithm_id,omitempty"` // 어느 LRCN 모델용 라벨인지
+	Segments    []SegmentLabel `json:"segments"`
+	LabeledAt   string         `json:"labeled_at"`
+	// DischargeModified — 운영자가 배출 ✓/✗ 를 실제로 고쳤는가.
+	//
+	// 세그먼트의 배출 분류는 모달에서 **시스템 판정이 프리필**된다
+	// (CycleCompletionDispute.tsx — `discharged: sysVerdict !== 'no'`). 운영자가
+	// 손대지 않으면 그대로 저장되므로, 이 플래그가 false 인 라벨을 정답지로 쓰면
+	// "현행 판정이 정답"이라는 순환이 된다.
+	//
+	// 값 자체는 dispute 이벤트(vision.observation.disputed)에 이미 있었으나 라벨과
+	// 분리돼 있어, 분석할 때마다 두 이벤트를 **시각으로 매칭**해야 했다(부정확).
+	// 라벨에 함께 남겨 정답지 판별을 정확하게 한다. 2026-08-12.
+	DischargeModified *bool `json:"discharge_modified,omitempty"`
+}
+
+// SegmentLabel — 단일 펄스 세그먼트 라벨. Source 로 사람 확정(operator) vs 제안값 저장
+// (prior) 구분 → 학습 시 operator 라벨에 가중치. Prior 는 감사용(요동 제안값 원본).
+//
+// Score 의미: 0 = 사료 섭이 안 함, 1 = 먹이를 열심히 먹음 (LRCN A1 먹이반응 타깃).
+//
+// Excluded=true 는 격리 — 이 펄스는 학습 라벨이 아니라 "판단 불가" 기록이다. 주 사유는
+// **실제 사료 미급이(전달 안 됨) → 먹이반응 판단 근거 없음**. 격리 세그먼트는 학습에서
+// 제외하되, 사유를 남겨 감사·급이 전달 실패 추적에 쓴다(그냥 버리지 않음).
+type SegmentLabel struct {
+	PulseNo       int      `json:"pulse_no"`
+	OffsetStartMs int64    `json:"offset_start_ms"`
+	OffsetEndMs   int64    `json:"offset_end_ms"`
+	Score         float64  `json:"score"`                    // 0=섭이안함 ~ 1=열심히먹음
+	Prior         *float64 `json:"prior,omitempty"`          // 요동 제안값(감사)
+	Source        string   `json:"source"`                   // "prior" | "operator"
+	Excluded      bool     `json:"excluded,omitempty"`       // 격리(판단 불가)
+	ExcludeReason string   `json:"exclude_reason,omitempty"` // 격리 사유 (excluded=true 필수)
+}
+
+func (p VisionSegmentLabelPayload) Validate() error {
+	if p.LabelID == "" {
+		return errors.New("label_id is required")
+	}
+	if p.CycleID == "" {
+		return errors.New("cycle_id is required")
+	}
+	if p.ClipID == "" {
+		return errors.New("clip_id is required")
+	}
+	if p.CameraID == "" {
+		return errors.New("camera_id is required")
+	}
+	if p.OperatorID == "" {
+		return errors.New("operator_id is required")
+	}
+	if len(p.Segments) == 0 {
+		return errors.New("segments must not be empty")
+	}
+	for i, s := range p.Segments {
+		if s.Excluded {
+			// 격리 = 판단 불가. 사유 필수, score/source 검사 생략(라벨 아님).
+			if s.ExcludeReason == "" {
+				return fmt.Errorf("segment[%d].exclude_reason required when excluded", i)
+			}
+			continue
+		}
+		if s.Score < 0 || s.Score > 1 {
+			return fmt.Errorf("segment[%d].score must be between 0 and 1", i)
+		}
+		if s.Source != "prior" && s.Source != "operator" {
+			return fmt.Errorf("segment[%d].source must be prior|operator", i)
+		}
+	}
+	if _, err := time.Parse(time.RFC3339Nano, p.LabeledAt); err != nil {
+		return fmt.Errorf("labeled_at must be RFC3339/RFC3339Nano: %w", err)
+	}
+	return nil
+}
+
+// FloorStillClasses — 바닥 상태 라벨 4클래스 (운영자 확정 2026-07-06, 자율급이 로드맵 축3 3b).
+// 색 구분 기준: 배설물=노란 침전, 펠릿 잔류=진한색.
+var FloorStillClasses = []string{"clean", "feces", "pellet", "mixed"}
+
+// FloorStillLabelPayload — 바닥 스틸 1장의 상태 라벨. media.floor_still.stored 의
+// still_id 를 참조한다. 같은 still 재라벨 시 최신 이벤트가 우선(세그먼트 라벨과 동일 규약).
+type FloorStillLabelPayload struct {
+	LabelID    string `json:"label_id"`
+	StillID    string `json:"still_id"`
+	TankID     string `json:"tank_id,omitempty"`
+	CameraID   string `json:"camera_id,omitempty"`
+	OperatorID string `json:"operator_id"`
+	Class      string `json:"class"` // clean | feces | pellet | mixed
+	LabeledAt  string `json:"labeled_at"`
+}
+
+func (p FloorStillLabelPayload) Validate() error {
+	if p.LabelID == "" {
+		return errors.New("label_id is required")
+	}
+	if p.StillID == "" {
+		return errors.New("still_id is required")
+	}
+	if p.OperatorID == "" {
+		return errors.New("operator_id is required")
+	}
+	valid := false
+	for _, c := range FloorStillClasses {
+		if p.Class == c {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("class must be one of %v", FloorStillClasses)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, p.LabeledAt); err != nil {
+		return fmt.Errorf("labeled_at must be RFC3339/RFC3339Nano: %w", err)
 	}
 	return nil
 }
@@ -504,20 +689,28 @@ type VisionBootstrapBox struct {
 	Y     float64 `json:"y"`     // 0..1
 	W     float64 `json:"w"`     // 0..1
 	H     float64 `json:"h"`     // 0..1
-	Class string  `json:"class"` // fish | food | exclude
+	Class string  `json:"class"` // fish | fish_abnormal | food | pellet | feces | exclude
 }
 
 // VisionBootstrapLabelRecordedPayload captures a "first day" labeling session
 // where an operator marks fish positions on a snapshot before any trained
 // detector exists. Used as YOLO fine-tune seed data.
 type VisionBootstrapLabelRecordedPayload struct {
-	LabelID     string               `json:"label_id"`
-	CameraID    string               `json:"camera_id"`
-	TankID      string               `json:"tank_id,omitempty"`
-	SnapshotRef string               `json:"snapshot_ref,omitempty"` // 캡처 시각의 frame 식별자
-	OperatorID  string               `json:"operator_id"`
-	Boxes       []VisionBootstrapBox `json:"boxes"`
-	RecordedAt  string               `json:"recorded_at"`
+	LabelID     string `json:"label_id"`
+	CameraID    string `json:"camera_id"`
+	TankID      string `json:"tank_id,omitempty"`
+	SnapshotRef string `json:"snapshot_ref,omitempty"` // 캡처 시각의 frame 식별자
+	// OriginStillID — 바닥 스틸(media.floor_still.stored)을 라벨한 경우 원본 still_id.
+	// floor-stills 목록의 "박스 라벨 완료" 추적용 (yolo-lrcn-fusion 설계 3.2).
+	OriginStillID string `json:"origin_still_id,omitempty"`
+	// OriginClipID/FrameOffsetSec — 저장 클립의 프레임을 라벨한 경우(① 탭) 원본
+	// clip_id 와 클립 내 시점(초). 학습 풀의 라벨 포화 클립 로테이션용 (2026-07-17,
+	// 같은 이미지 반복 노출 fix).
+	OriginClipID   string               `json:"origin_clip_id,omitempty"`
+	FrameOffsetSec float64              `json:"frame_offset_sec,omitempty"`
+	OperatorID     string               `json:"operator_id"`
+	Boxes          []VisionBootstrapBox `json:"boxes"`
+	RecordedAt     string               `json:"recorded_at"`
 }
 
 func (p VisionBootstrapLabelRecordedPayload) Validate() error {
@@ -541,9 +734,9 @@ func (p VisionBootstrapLabelRecordedPayload) Validate() error {
 			return fmt.Errorf("box %d: coords out of [0,1] range", i)
 		}
 		switch b.Class {
-		case "fish", "food", "exclude":
+		case "fish", "fish_abnormal", "food", "pellet", "feces", "exclude":
 		default:
-			return fmt.Errorf("box %d: invalid class %q (allowed: fish|food|exclude)", i, b.Class)
+			return fmt.Errorf("box %d: invalid class %q (allowed: fish|fish_abnormal|food|pellet|feces|exclude)", i, b.Class)
 		}
 	}
 	if _, err := time.Parse(time.RFC3339Nano, p.RecordedAt); err != nil {
@@ -1044,6 +1237,9 @@ type TankStockingRecordedPayload struct {
 	SupplierID            string  `json:"supplier_id,omitempty"` // 거래처(부화장) partner_id
 	StockedAt             string  `json:"stocked_at"`
 	OperatorID            string  `json:"operator_id"`
+	// "platform" = 앱에 이미 있던 입식을 GX10 이 이어받은 것(새 입식 아님). 서버로 올릴 때
+	// 이 입식은 다시 만들지 않는다 — 앱 쪽 로트가 정본(docs/53 2단계).
+	ImportedFrom string `json:"imported_from,omitempty"`
 }
 
 func (p TankStockingRecordedPayload) Validate() error {
@@ -1125,6 +1321,7 @@ type TankSamplingRecordedPayload struct {
 	StdWeightG    float64 `json:"std_weight_g,omitempty"`
 	MinWeightG    float64 `json:"min_weight_g,omitempty"`
 	MaxWeightG    float64 `json:"max_weight_g,omitempty"`
+	AvgLengthCm   float64 `json:"avg_length_cm,omitempty"`
 	HealthScore   int     `json:"health_score,omitempty"` // 0~10 (해부 결과)
 	HealthNotes   string  `json:"health_notes,omitempty"`
 	AbnormalCount int     `json:"abnormal_count,omitempty"` // 이상 개체 수
@@ -1219,15 +1416,16 @@ func (p TankTreatmentRecordedPayload) Validate() error {
 
 // TankMortalityRecordedPayload — 폐사 기록 CTE (생산 정산 + 복지 KDE).
 type TankMortalityRecordedPayload struct {
-	MortalityID    string `json:"mortality_id"`
-	TankID         string `json:"tank_id"`
-	StockingID     string `json:"stocking_id,omitempty"`
-	LotNo          string `json:"lot_no,omitempty"`
-	DeadCount      int    `json:"dead_count"`
-	EstimatedCause string `json:"estimated_cause,omitempty"`
-	ObservedAt     string `json:"observed_at"`
-	OperatorID     string `json:"operator_id"`
-	Notes          string `json:"notes,omitempty"`
+	MortalityID    string  `json:"mortality_id"`
+	TankID         string  `json:"tank_id"`
+	StockingID     string  `json:"stocking_id,omitempty"`
+	LotNo          string  `json:"lot_no,omitempty"`
+	DeadCount      int     `json:"dead_count"`
+	DeadWeightG    float64 `json:"dead_weight_g,omitempty"` // 폐사체 총중량(g). biomass 정산·기록용.
+	EstimatedCause string  `json:"estimated_cause,omitempty"`
+	ObservedAt     string  `json:"observed_at"`
+	OperatorID     string  `json:"operator_id"`
+	Notes          string  `json:"notes,omitempty"`
 }
 
 func (p TankMortalityRecordedPayload) Validate() error {
@@ -1260,6 +1458,8 @@ type TankTransferRecordedPayload struct {
 	ToTankID       string `json:"to_tank_id,omitempty"` // 수조내 이동 시 필수, sale 시 비움
 	ToStockingID   string `json:"to_stocking_id,omitempty"`
 	ToLotNo        string `json:"to_lot_no,omitempty"`
+	// merge 가 이미 입식된 수조로 들어간 경우 true — 받는 수조는 자기 lot 유지, 마릿수만 더함.
+	MergedIntoExisting bool `json:"merged_into_existing,omitempty"`
 	// sale (외부 판매/출하) 전용 — 도착 농장/거래처 + 운송.
 	DestinationName string  `json:"destination_name,omitempty"` // 이동 농장/거래처 사이트명
 	VehicleInfo     string  `json:"vehicle_info,omitempty"`     // 이동 차량 정보
@@ -1457,8 +1657,9 @@ type SiteHarvestLine struct {
 	LotNo      string  `json:"lot_no,omitempty"`
 	Count      int     `json:"count"`
 	AvgWeightG float64 `json:"avg_weight_g,omitempty"`
-	FullClose  bool    `json:"full_close"`           // true 면 수조 lifecycle 마감
-	HarvestID  string  `json:"harvest_id,omitempty"` // 파생된 tank harvest_id (full_close 시)
+	FullClose  bool    `json:"full_close"`            // true 면 수조 lifecycle 마감
+	StockingID string  `json:"stocking_id,omitempty"` // 부분 출하 시 차감할 활성 입식 (마릿수 집계용)
+	HarvestID  string  `json:"harvest_id,omitempty"`  // 파생된 tank harvest_id (full_close 시)
 }
 
 // SiteHarvestRecordedPayload — 사업자(site) 출하 거래(건). 한 거래처로 여러 수조/부분 출하.
@@ -1640,6 +1841,9 @@ func ValidMetric(v string) bool {
 		MetricPumpPressure,
 		MetricFeedWeight,
 		MetricLightIntensity,
+		MetricChillerCurrent,
+		MetricChillerPower,
+		MetricChillerStatus,
 		MetricUnknown:
 		return true
 	}

@@ -13,6 +13,16 @@ type FeedingSchedulePattern struct {
 	GapMs           int      `json:"gap_ms"`
 	TotalPulses     int      `json:"total_pulses"`
 	TargetAmountG   *float64 `json:"target_amount_g,omitempty"`
+
+	// 수온 급변 감산 — AIScheduler 가 TargetAmountG 에 이미 곱해 둔 계수와 그 근거
+	// (2026-10-03). 종전에는 로그에만 남아, 화면은 프론트 자체 계산값(감산 전)을
+	// 보여주고 실제로는 절반이 나가는 괴리가 있었다. 1.0 이거나 미설정이면 감산 없음.
+	// pattern_json 은 스키마 없는 blob 이라 migration 불필요.
+	ReductionFactor  float64  `json:"reduction_factor,omitempty"`
+	ReductionReason  string   `json:"reduction_reason,omitempty"` // "rapid_change_24h" | "adaptation_48h"
+	TempNowC         *float64 `json:"temp_now_c,omitempty"`
+	Temp24hAgoC      *float64 `json:"temp_24h_ago_c,omitempty"`
+	TargetBeforeCutG *float64 `json:"target_before_cut_g,omitempty"`
 }
 
 // FeedingSchedule is a row from the feeding_schedules table.

@@ -64,7 +64,11 @@ func (s *Server) handleTankWeightProjection(w http.ResponseWriter, r *http.Reque
 	if lc != nil {
 		species = lc.Species
 		growthStage = lc.GrowthStage
-		currentCount = lc.InitialCount // mortality 모델 없음 — N₀ 고수
+		// 현재 마리수 = 정본 파생값(tank_profiles.fish_count = 입식−폐사). 여기서 재계산하지 않는다.
+		currentCount = lc.InitialCount // 프로파일 없을 때 fallback
+		if tp, terr := s.store.GetTankProfile(r.Context(), tankID); terr == nil && tp != nil {
+			currentCount = tp.FishCount
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

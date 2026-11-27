@@ -217,7 +217,7 @@ func newBiomassTestStore(t *testing.T) storage.Store {
 		"001_init.sql",
 		"002_autonomous_mode.sql",
 		"003_lifecycle.sql",
-		"004_sampling.sql",
+		"004_sampling.sql", "041_sampling_length.sql",
 		"005_fcr_calibration.sql",
 		"030_traceability_lifecycle.sql",
 	} {
@@ -355,8 +355,8 @@ func newBiomassTestApp(t *testing.T, st storage.Store) *runtime.App {
 // ── FCR table sanity ─────────────────────────────────────────────────────────
 
 func TestFCRTableEntries(t *testing.T) {
-	if len(expectedFCRTable) != 18 {
-		t.Errorf("expected 18 FCR table entries, got %d", len(expectedFCRTable))
+	if len(expectedFCRTable) != 20 {
+		t.Errorf("expected 20 FCR table entries, got %d", len(expectedFCRTable))
 	}
 }
 
@@ -372,6 +372,9 @@ func TestLookupFCRKnownSpecies(t *testing.T) {
 		{"연어", "growout", 1.2},
 		{"광어", "growout", 1.8},
 		{"우럭", "growout", 1.7},
+		// 운영종 슬러그 — 실 데이터 형식(atlantic_salmon). 미스 시 default 1.5 로 새던 버그 회귀 방지.
+		{"atlantic_salmon", "growout", 1.2},
+		{"atlantic_salmon", "juvenile", 1.0},
 	}
 	for _, c := range cases {
 		fcr, ok := LookupFCR(c.species, c.growthStage)

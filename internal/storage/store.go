@@ -46,8 +46,22 @@ type EventFilter struct {
 	EventType string
 	DeviceID  string
 	Since     *time.Time
-	Limit     int
-	AfterSeq  int64
+	// Until 은 recorded_at 상한. Since 와 함께 쓰면 idx_events_type_time 의 범위 스캔이
+	// 되어, 희소 조건(json_extract)을 전체 행에 돌리는 것을 피한다 — 순수 Go sqlite
+	// 드라이버에서 그 전체 스캔은 26만 행에 10초 이상 걸린다(2026-09-17 실측).
+	Until    *time.Time
+	Limit    int
+	AfterSeq int64
+	// EvidencePhase 는 payload_json 의 evidence.phase 로 필터한다(예: media.clip.stored
+	// 의 "feeding"/"baseline"). 희소 phase(급이)가 다수 phase(상시 baseline)에 파묻히지
+	// 않게 DB 단에서 분리 조회하는 용도.
+	EvidencePhase string
+	// PayloadClipID 는 payload_json 의 clip_id 로 필터한다. 특정 클립을 최근 N건 스캔
+	// 윈도우에 의존하지 않고 DB 단에서 직접 조회(급이 클립이 baseline 에 파묻혀도 찾음).
+	PayloadClipID string
+	// PayloadCycleID 는 payload_json 의 top-level cycle_id 로 필터한다(예: feed.pulse.completed).
+	// 펄스 이벤트가 무한 누적돼도 오래된 사이클의 세그먼트를 비파편적으로 조회.
+	PayloadCycleID string
 }
 
 // LatestReadingFilter restricts latest sensor reading queries.
@@ -228,17 +242,17 @@ type ControlCommand struct {
 // WaterQualityBucketProjection is a derived two-minute water-quality bucket.
 // It is replayable from events and must not be treated as source of truth.
 type WaterQualityBucketProjection struct {
-	TankID           string
-	BucketStart      time.Time
-	BucketSec        int
-	TemperatureCAvg  *float64
-	PHAvg            *float64
-	DOMgLAvg         *float64
-	Quality          string
-	SampleCount      int
-	SuspectCount     int
-	SourceReadingIDs string
-	UpdatedAt        time.Time
+	TankID           string    `json:"tank_id"`
+	BucketStart      time.Time `json:"bucket_start"`
+	BucketSec        int       `json:"bucket_sec"`
+	TemperatureCAvg  *float64  `json:"temperature_c_avg"`
+	PHAvg            *float64  `json:"ph_avg"`
+	DOMgLAvg         *float64  `json:"do_mg_l_avg"`
+	Quality          string    `json:"quality"`
+	SampleCount      int       `json:"sample_count"`
+	SuspectCount     int       `json:"suspect_count"`
+	SourceReadingIDs string    `json:"source_reading_ids"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // FeedingImpactAnalysisProjection is a derived feeding water-quality analysis.
@@ -336,17 +350,221 @@ type TankDocument struct {
 
 // InventoryItem — 재고 품목 + 현재고. 구매/사용 이벤트로 on_hand 증감.
 type InventoryItem struct {
-	ItemID       string
-	Category     string // feed | drug | material
+	ItemID          string
+	Category        string // feed | drug | material
+	Name            string
+	Unit            string
+	OnHandQty       float64
+	Spec            string
+	Supplier        string
+	ReorderLevel    *float64 // nullable
+	Notes           string
+	CompositionJSON string // 영양성분표(보증성분) JSON, 빈 문자열=미등록 (사료 위주)
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// PlantProfile — 가공공장 정보. 허가·등록번호와 인권 정책 유무는 GDST 가공 기록에 쓰인다.
+type PlantProfile struct {
+	SiteID             string
+	BusinessNo         string
+	LicenseName        string
+	LicenseNo          string
+	LicenseAuthority   string
+	HACCPCertNo        string
+	HumanWelfarePolicy string // "" | none | internal_policy | third_party_audit
+	RetentionYears     int
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// PlantZone — 공장 안의 구역.
+type PlantZone struct {
+	ZoneID       string
+	SiteID       string
 	Name         string
-	Unit         string
-	OnHandQty    float64
-	Spec         string
-	Supplier     string
-	ReorderLevel *float64 // nullable
-	Notes        string
+	HygieneClass string // general | clean
+	TempClass    string // ambient | chilled | frozen
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// PlantEquipment — 설비.
+type PlantEquipment struct {
+	EquipmentID string
+	SiteID      string
+	ZoneID      string
+	Kind        string
+	Name        string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// PlantSensor — 공정 센서(구역 또는 설비에 붙는다).
+type PlantSensor struct {
+	SensorID         string
+	SiteID           string
+	ZoneID           string
+	EquipmentID      string
+	Metric           string
+	Unit             string
+	IsMock           bool
+	CalibrationDueAt *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// LocalUser — 현장 서명용 로컬 계정. PIN 은 솔트를 섞은 해시로만 둔다.
+type LocalUser struct {
+	UserID    string
+	SiteID    string
+	Name      string
+	Role      string // admin | reviewer | monitor
+	PinSalt   string
+	PinHash   string
+	Active    bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// PlantCertificate — 인증서 원장의 한 줄. 날짜는 YYYY-MM-DD 문자열.
+type PlantCertificate struct {
+	CertID     string
+	SiteID     string
+	Scheme     string
+	CertNo     string
+	Scope      string
+	HolderKind string // own | supplier
+	HolderName string
+	ValidFrom  string
+	ValidUntil string // "" = 만료일 없음
+	VerifiedAt string
+}
+
+// 생산 실행 — docs/54 §26. 시각은 UTC unix 밀리초.
+
+// ProcessReading — 공정 센서 측정값 하나.
+type ProcessReading struct {
+	SensorID string
+	Value    float64
+	Source   string // mock | sensor
+	At       int64
+}
+
+// MockSensorState — 모의 센서에 지정한 값 또는 끊김. UntilAt 이 지나면 무효.
+type MockSensorState struct {
+	SensorID string
+	Mode     string // fixed | outage
+	Value    float64
+	UntilAt  int64
+}
+
+// ProcessLot — 생산 lot 하나. VersionID 의 게시본으로 판정한다.
+type ProcessLot struct {
+	LotID      string
+	SiteID     string
+	PlanID     string
+	VersionID  string
+	LotNo      string
+	Status     string // running | closed
+	InputsJSON string
+	OutputKg   float64
+	StartedBy  string
+	StartedAt  int64
+	ClosedBy   string
+	ClosedAt   int64
+	ReviewedBy string
+	ReviewedAt int64
+}
+
+// ProcessLotEvent — lot 의 단계 진입(enter)·이탈(exit).
+type ProcessLotEvent struct {
+	Kind   string
+	StepID string
+	LinkID string
+	At     int64
+}
+
+// ProcessCheck — 사람이 넣은 측정·점검 값.
+type ProcessCheck struct {
+	LimitID string
+	Value   float64
+	ByUser  string
+	At      int64
+}
+
+// ProcessDeviation — 한계기준 이탈 또는 모니터링 불능.
+type ProcessDeviation struct {
+	DevID            string
+	LotID            string
+	CCPID            string
+	LimitID          string
+	Kind             string // deviation | outage
+	DetectedAt       int64
+	Detail           string
+	Status           string // open | closed
+	CorrectiveAction string
+	Disposition      string
+	ClosedBy         string
+	ClosedAt         int64
+}
+
+// IssuedDocument — 발행 문서 대장의 한 줄.
+type IssuedDocument struct {
+	DocID    string
+	SiteID   string
+	Kind     string // plan | lot
+	RefID    string
+	Title    string
+	SHA256   string
+	DataHash string
+	IssuedBy string
+	IssuedAt int64
+	Path     string
+}
+
+// PlantForm — 공장 기록 양식의 한 판. Content 는 plantform.Form 의 JSON.
+type PlantForm struct {
+	SiteID    string
+	FormID    string
+	Revision  int
+	Source    string // default | import | edit
+	BasePack  string
+	BaseID    string
+	Content   string
+	Note      string
+	CreatedBy string
+	CreatedAt int64
+}
+
+// HACCPPlan — 가공공장의 HACCP 계획(제품군 하나). docs/54.
+type HACCPPlan struct {
+	PlanID       string
+	SiteID       string
+	ProductGroup string
+	Name         string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// HACCPPlanVersion — 계획의 한 버전. 내용은 ContentJSON(haccp.PlanContent) 한 덩어리.
+// status: draft | published | retired. 게시 뒤에는 내용이 바뀌지 않는다.
+type HACCPPlanVersion struct {
+	VersionID         string
+	PlanID            string
+	VersionNo         int
+	Status            string
+	TemplateRef       string
+	ContentJSON       string
+	ContentHash       string
+	ChangeReason      string
+	CCPChanged        bool
+	OnsiteConfirmedBy string
+	OnsiteConfirmedAt *time.Time
+	PublishedBy       string
+	PublishedAt       *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Partner — 거래처(공급처/구매처) 마스터. site 소속.
@@ -414,6 +632,7 @@ type TankSampling struct {
 	StdWeightG       *float64 // optional
 	MinWeightG       *float64
 	MaxWeightG       *float64
+	AvgLengthCm      *float64 // optional
 	HealthScore      *int
 	HealthNotes      string
 	AbnormalCount    *int
@@ -507,15 +726,16 @@ type Store interface {
 	// Events
 	AppendEvent(ctx context.Context, e *Event) (int64, error)
 	QueryEvents(ctx context.Context, f EventFilter) ([]*Event, error)
-	ListUnsyncedUnbatchedEvents(ctx context.Context, limit int) ([]*Event, error)
+	ListUnsyncedUnbatchedEvents(ctx context.Context, includeTypes []string, limit int) ([]*Event, error)
+	CollapseRedundantReadings(ctx context.Context) (int64, error)
 	LatestSensorReadings(ctx context.Context, f LatestReadingFilter) ([]*LatestSensorReading, error)
 	UnsyncedCount(ctx context.Context) (int64, error)
 	OldestUnsyncedAge(ctx context.Context) (time.Duration, error)
 	MarkSynced(ctx context.Context, eventIDs []string) error
 	// Retention — 만료 telemetry 백업+제거. SelectEventsOlderThan 은 sequence ASC 로
 	// 배치 반환, DeleteEventsOlderThanUpToSeq 는 그 배치(최대 sequence)까지만 삭제한다.
-	SelectEventsOlderThan(ctx context.Context, eventType string, cutoff time.Time, limit int) ([]ArchivableEvent, error)
-	DeleteEventsOlderThanUpToSeq(ctx context.Context, eventType string, cutoff time.Time, maxSeq int64) (int64, error)
+	SelectEventsOlderThan(ctx context.Context, eventType string, filter MetricFilter, cutoff time.Time, limit int) ([]ArchivableEvent, error)
+	DeleteEventsOlderThanUpToSeq(ctx context.Context, eventType string, filter MetricFilter, cutoff time.Time, maxSeq int64) (int64, error)
 	// 센서 일별 집계 — recorded_at < before 인 sensor.reading.recorded 를 (날짜, sensor_id, metric)
 	// 별 min/max/avg/count 로 묶어 반환. 날짜는 tzOffsetSeconds 만큼 보정한 로컬 달력일.
 	AggregateSensorReadingsDailyBefore(ctx context.Context, before time.Time, tzOffsetSeconds int) ([]SensorDailyAgg, error)
@@ -525,6 +745,7 @@ type Store interface {
 	// KV
 	KVGet(ctx context.Context, key string) (string, bool, error)
 	KVSet(ctx context.Context, key, value string) error
+	KVListPrefix(ctx context.Context, prefix string) (map[string]string, error)
 
 	// Tank profiles
 	UpsertTankProfile(ctx context.Context, profile *TankProfile) error
@@ -555,6 +776,7 @@ type Store interface {
 
 	// Lifecycle (D-1)
 	GetTankLifecycle(ctx context.Context, tankID string) (*TankLifecycle, error) // nil if no row
+	SumTankCountAdjustment(ctx context.Context, tankID, stockingID string) (int, error)
 	UpsertTankLifecycle(ctx context.Context, lifecycle *TankLifecycle) error
 
 	// GDST 증빙 서류
@@ -568,6 +790,7 @@ type Store interface {
 	GetInventoryItem(ctx context.Context, itemID string) (*InventoryItem, error) // nil if no row
 	ListInventoryItems(ctx context.Context, category string) ([]*InventoryItem, error)
 	AdjustInventoryOnHand(ctx context.Context, itemID string, delta float64) (float64, error) // returns new on_hand
+	SetInventoryComposition(ctx context.Context, itemID, compJSON string) error               // 영양성분표 JSON 갱신
 
 	// 거래처(공급처/구매처)
 	UpsertPartner(ctx context.Context, p *Partner) error
@@ -643,6 +866,71 @@ type Store interface {
 	DeleteFarm(ctx context.Context, farmID string) error
 	CountSitesForFarm(ctx context.Context, farmID string) (int, error)
 	UpsertSiteLand(ctx context.Context, sl *site.SiteLand) error
+	UpsertSiteProcessing(ctx context.Context, sl *site.SiteLand) error
+	// GetSiteType returns the site_type of a site, or "" if the site does not exist.
+	GetSiteType(ctx context.Context, siteID string) (string, error)
+
+	// Plant setup (가공공장 구성: 공장 정보·구역·설비·공정 센서·로컬 계정) — docs/54.
+	UpsertPlantProfile(ctx context.Context, p *PlantProfile) error
+	GetPlantProfile(ctx context.Context, siteID string) (*PlantProfile, error) // nil if no row
+	UpsertPlantZone(ctx context.Context, z *PlantZone) error
+	ListPlantZones(ctx context.Context, siteID string) ([]*PlantZone, error)
+	UpsertPlantEquipment(ctx context.Context, e *PlantEquipment) error
+	ListPlantEquipment(ctx context.Context, siteID string) ([]*PlantEquipment, error)
+	UpsertPlantSensor(ctx context.Context, sn *PlantSensor) error
+	ListPlantSensors(ctx context.Context, siteID string) ([]*PlantSensor, error)
+	InsertLocalUser(ctx context.Context, u *LocalUser) error
+	GetLocalUser(ctx context.Context, userID string) (*LocalUser, error) // nil if no row
+	ListLocalUsers(ctx context.Context, siteID string) ([]*LocalUser, error)
+	UpsertPlantCertificate(ctx context.Context, c *PlantCertificate) error
+	ListPlantCertificates(ctx context.Context, siteID string) ([]*PlantCertificate, error)
+	// SetPlantComplianceProfiles replaces the schemes the plant applies.
+	SetPlantComplianceProfiles(ctx context.Context, siteID string, profileIDs []string) error
+	ListPlantComplianceProfiles(ctx context.Context, siteID string) ([]string, error)
+
+	// 생산 실행 — docs/54 §26.
+	InsertProcessReading(ctx context.Context, siteID string, r *ProcessReading) error
+	ListProcessReadings(ctx context.Context, sensorID string, from, to int64) ([]ProcessReading, error)
+	LatestProcessReading(ctx context.Context, sensorID string) (*ProcessReading, error) // nil if none
+	SetMockSensorState(ctx context.Context, st *MockSensorState) error
+	ListMockSensorStates(ctx context.Context) ([]MockSensorState, error)
+	InsertProcessLot(ctx context.Context, l *ProcessLot) error
+	GetProcessLot(ctx context.Context, lotID string) (*ProcessLot, error) // nil if no row
+	ListProcessLots(ctx context.Context, siteID string) ([]*ProcessLot, error)
+	ListRunningProcessLots(ctx context.Context) ([]*ProcessLot, error)
+	CloseProcessLot(ctx context.Context, lotID string, outputKg float64, by string, at int64) error
+	ReviewProcessLot(ctx context.Context, lotID, by string, at int64) error
+	InsertProcessLotEvent(ctx context.Context, lotID string, e *ProcessLotEvent) error
+	ListProcessLotEvents(ctx context.Context, lotID string) ([]ProcessLotEvent, error)
+	InsertProcessCheck(ctx context.Context, lotID string, c *ProcessCheck) error
+	ListProcessChecks(ctx context.Context, lotID string) ([]ProcessCheck, error)
+	// InsertProcessDeviation records a deviation once per (lot, limit, kind). Returns false if it already existed.
+	InsertProcessDeviation(ctx context.Context, d *ProcessDeviation) (bool, error)
+	ListProcessDeviations(ctx context.Context, lotID string) ([]*ProcessDeviation, error)
+	// CloseProcessDeviation closes an open deviation. Returns false if it was not open.
+	CloseProcessDeviation(ctx context.Context, devID, action, disposition, by string, at int64) (bool, error)
+	InsertIssuedDocument(ctx context.Context, d *IssuedDocument) error
+	GetIssuedDocument(ctx context.Context, docID string) (*IssuedDocument, error) // nil if no row
+	ListIssuedDocuments(ctx context.Context, siteID string) ([]*IssuedDocument, error)
+
+	// 공장 기록 양식 — docs/56 §18. 판은 쌓기만 한다.
+	// InsertPlantForm stores f as the next revision of (site, form) and sets f.Revision.
+	InsertPlantForm(ctx context.Context, f *PlantForm) error
+	GetPlantForm(ctx context.Context, siteID, formID string) (*PlantForm, error) // 지금 쓰는 판. nil if no row
+	ListPlantForms(ctx context.Context, siteID string) ([]*PlantForm, error)     // 양식마다 지금 쓰는 판
+
+	// HACCP plans (가공공장 공정도·CCP) — docs/54.
+	CreateHACCPPlan(ctx context.Context, p *HACCPPlan, first *HACCPPlanVersion) error
+	GetHACCPPlan(ctx context.Context, planID string) (*HACCPPlan, error) // nil if no row
+	ListHACCPPlans(ctx context.Context, siteID string) ([]*HACCPPlan, error)
+	ListHACCPPlanVersions(ctx context.Context, planID string) ([]*HACCPPlanVersion, error)
+	GetHACCPPlanVersion(ctx context.Context, versionID string) (*HACCPPlanVersion, error) // nil if no row
+	InsertHACCPPlanVersion(ctx context.Context, v *HACCPPlanVersion) error
+	// UpdateHACCPDraftContent saves a draft's content. Returns false if the version is not a draft.
+	UpdateHACCPDraftContent(ctx context.Context, versionID, contentJSON string) (bool, error)
+	// PublishHACCPPlanVersion publishes a draft and retires the plan's previous published version.
+	// Returns false if the version is not a draft.
+	PublishHACCPPlanVersion(ctx context.Context, v *HACCPPlanVersion) (bool, error)
 	UpsertSiteMarine(ctx context.Context, sm *site.SiteMarine) error
 	ListSites(ctx context.Context, farmID string) ([]map[string]any, error)
 	DeleteSite(ctx context.Context, siteID string) error
@@ -710,6 +998,10 @@ type Store interface {
 
 	// Environmental snapshots (Phase 4 C-3w)
 	InsertEnvironmentalSnapshot(ctx context.Context, snap *EnvironmentalSnapshot) error
+	UpsertSiteEnvObservations(ctx context.Context, obs []SiteEnvObservation) error
+	ListSiteEnvObservations(ctx context.Context, siteID, metric string, since, until time.Time) ([]SiteEnvObservation, error)
+	AggregateSiteEnvDaily(ctx context.Context, siteID string, since time.Time, tzOffsetSeconds int) ([]EnvDailyAgg, error)
+	AggregateTankSensorDailyByObserved(ctx context.Context, since time.Time, tzOffsetSeconds int) ([]EnvDailyAgg, error)
 	ListRecentEnvironmentalSnapshots(ctx context.Context, siteID string, limit int) ([]*EnvironmentalSnapshot, error)
 
 	// Arbiter decisions (Phase 5)

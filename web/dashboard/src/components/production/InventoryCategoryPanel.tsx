@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
+import { dateLocale } from '../../lib/format';
 import { Plus, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { Inventory, ApiError } from '../../lib/api';
-import type { InventoryItem, InventoryCategory } from '../../lib/types';
+import type { InventoryItem, InventoryCategory, FeedComposition, PurchaseHistoryItem } from '../../lib/types';
 import { Field, SelectField } from '../sections/TankSettingsSection';
 import { Button } from '../ui/button';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InventoryCategoryPanel — 재고 현황 + 구매(입고) 폼 + 소모(자재만) 폼
@@ -52,7 +53,7 @@ function accentFor(cat: InventoryCategory): Accent {
 
 // ── 재고 카드 ─────────────────────────────────────────────────────────────────
 
-function ItemCard({ item, accent }: { item: InventoryItem; accent: Accent }) {
+function ItemCard({ item, accent, onChanged }: { item: InventoryItem; accent: Accent; onChanged?: () => void }) {
   const { tr } = useLanguage();
   return (
     <div className={`bg-gradient-to-br from-gray-900 to-black border ${accent.border} rounded-lg p-3 flex flex-col gap-1`}>
@@ -65,7 +66,7 @@ function ItemCard({ item, accent }: { item: InventoryItem; accent: Accent }) {
         )}
       </div>
       <div className={`text-2xl font-bold ${accent.text}`}>
-        {item.on_hand_qty.toLocaleString('ko-KR')}
+        {item.on_hand_qty.toLocaleString(dateLocale())}
         <span className="text-sm font-normal text-gray-400 ml-1">{item.unit}</span>
       </div>
       {item.reorder_level != null && (
@@ -76,6 +77,151 @@ function ItemCard({ item, accent }: { item: InventoryItem; accent: Accent }) {
       {item.supplier && (
         <div className="text-[10px] text-gray-500 truncate">{tr('itemCard.supplier')}: {item.supplier}</div>
       )}
+      {item.category === 'feed' && <CompositionSection item={item} onChanged={onChanged} />}
+    </div>
+  );
+}
+
+// 사료 영양성분표 — 표시 + 편집. 라벨의 보증성분 8개 + 제품메타. label 은 i18n 키.
+const COMPOSITION_FIELDS: { key: keyof FeedComposition; label: string }[] = [
+  { key: 'crude_protein_pct', label: 'inventoryPanel.compCrudeProtein' },
+  { key: 'crude_fat_pct', label: 'inventoryPanel.compCrudeFat' },
+  { key: 'lysine_pct', label: 'inventoryPanel.compLysine' },
+  { key: 'total_phosphorus_pct', label: 'inventoryPanel.compTotalPhosphorus' },
+  { key: 'moisture_pct', label: 'inventoryPanel.compMoisture' },
+  { key: 'crude_fiber_pct', label: 'inventoryPanel.compCrudeFiber' },
+  { key: 'crude_ash_pct', label: 'inventoryPanel.compCrudeAsh' },
+  { key: 'calcium_pct', label: 'inventoryPanel.compCalcium' },
+];
+
+function CompositionSection({ item, onChanged }: { item: InventoryItem; onChanged?: () => void }) {
+  const { tr } = useLanguage();
+  const [editing, setEditing] = useState(false);
+  const comp = item.composition ?? null;
+  const has = comp && Object.values(comp).some(v => v !== undefined && v !== null && v !== '');
+
+  return (
+    <div className="mt-1.5 pt-1.5 border-t border-gray-700/40">
+      {has && !editing && (
+        <div className="flex flex-col gap-0.5">
+          <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px]">
+            {comp?.crude_protein_pct != null && <span className="text-blue-300">{tr('inventoryPanel.compProteinShort')} {comp.crude_protein_pct}%</span>}
+            {comp?.crude_fat_pct != null && <span className="text-amber-300">{tr('inventoryPanel.compFatShort')} {comp.crude_fat_pct}%</span>}
+            {comp?.total_phosphorus_pct != null && <span className="text-cyan-400">{tr('inventoryPanel.compPhosphorusShort')} {comp.total_phosphorus_pct}%</span>}
+            {comp?.calcium_pct != null && <span className="text-gray-400">Ca {comp.calcium_pct}%</span>}
+          </div>
+          {(comp?.product_model || comp?.pellet_size_mm != null) && (
+            <div className="text-[9px] text-gray-600 truncate">
+              {comp?.product_model}{comp?.pellet_size_mm != null ? ` · ${comp.pellet_size_mm}mm` : ''}
+            </div>
+          )}
+        </div>
+      )}
+      {!editing && (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-[10px] text-blue-400 hover:text-blue-300 mt-0.5"
+        >
+          {has ? tr('inventoryPanel.btnEditComposition') : tr('inventoryPanel.btnAddComposition')}
+        </button>
+      )}
+      {editing && (
+        <CompositionEditor
+          item={item}
+          onDone={() => { setEditing(false); onChanged?.(); }}
+          onCancel={() => setEditing(false)}
+          tr={tr}
+        />
+      )}
+    </div>
+  );
+}
+
+function CompositionEditor({
+  item, onDone, onCancel, tr,
+}: {
+  item: InventoryItem;
+  onDone: () => void;
+  onCancel: () => void;
+  tr: (key: string) => string;
+}) {
+  const c = item.composition ?? {};
+  const numInit = (v?: number) => (v == null ? '' : String(v));
+  const [vals, setVals] = useState<Record<string, string>>(() => {
+    const o: Record<string, string> = {};
+    for (const f of COMPOSITION_FIELDS) o[f.key] = numInit(c[f.key] as number | undefined);
+    return o;
+  });
+  const [model, setModel] = useState(c.product_model ?? '');
+  const [pellet, setPellet] = useState(numInit(c.pellet_size_mm));
+  const [species, setSpecies] = useState(c.target_species ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const body: FeedComposition = {};
+      for (const f of COMPOSITION_FIELDS) {
+        const raw = vals[f.key];
+        if (raw !== '' && !Number.isNaN(Number(raw))) (body[f.key] as number) = Number(raw);
+      }
+      if (model.trim()) body.product_model = model.trim();
+      if (pellet !== '' && !Number.isNaN(Number(pellet))) body.pellet_size_mm = Number(pellet);
+      if (species.trim()) body.target_species = species.trim();
+      await Inventory.setComposition(item.item_id, body);
+      onDone();
+    } catch (e) {
+      setErr(friendlyError(e, tr));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-1.5 flex flex-col gap-1.5">
+      <div className="grid grid-cols-2 gap-1">
+        {COMPOSITION_FIELDS.map(f => (
+          <label key={f.key} className="text-[9px] text-gray-400 flex flex-col gap-0.5">
+            {tr(f.label)}
+            <input
+              type="number"
+              step="0.01"
+              value={vals[f.key]}
+              onChange={e => setVals(v => ({ ...v, [f.key]: e.target.value }))}
+              className="px-1.5 py-0.5 text-[11px] bg-gray-800 border border-gray-600 rounded text-white w-full"
+            />
+          </label>
+        ))}
+      </div>
+      <label className="text-[9px] text-gray-400 flex flex-col gap-0.5">
+        {tr('inventoryPanel.fieldProductModel')}
+        <input value={model} onChange={e => setModel(e.target.value)}
+          placeholder={tr('inventoryPanel.phProductModel')}
+          className="px-1.5 py-0.5 text-[11px] bg-gray-800 border border-gray-600 rounded text-white w-full" />
+      </label>
+      <div className="grid grid-cols-2 gap-1">
+        <label className="text-[9px] text-gray-400 flex flex-col gap-0.5">
+          {tr('inventoryPanel.fieldPelletSize')}
+          <input type="number" step="0.1" value={pellet} onChange={e => setPellet(e.target.value)}
+            className="px-1.5 py-0.5 text-[11px] bg-gray-800 border border-gray-600 rounded text-white w-full" />
+        </label>
+        <label className="text-[9px] text-gray-400 flex flex-col gap-0.5">
+          {tr('inventoryPanel.fieldTargetSpecies')}
+          <input value={species} onChange={e => setSpecies(e.target.value)} placeholder={tr('inventoryPanel.phTargetSpecies')}
+            className="px-1.5 py-0.5 text-[11px] bg-gray-800 border border-gray-600 rounded text-white w-full" />
+        </label>
+      </div>
+      {err && <div className="text-[10px] text-red-400 font-mono">{err}</div>}
+      <div className="flex gap-1">
+        <button type="button" onClick={() => void submit()} disabled={busy}
+          className="px-2 py-0.5 text-[11px] rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
+          {busy ? tr('inventoryPanel.saving') : tr('inventoryPanel.btnSave')}
+        </button>
+        <button type="button" onClick={onCancel} className="px-2 py-0.5 text-[11px] rounded bg-gray-700 text-gray-200">{tr('inventoryPanel.btnCancel')}</button>
+      </div>
     </div>
   );
 }
@@ -163,7 +309,8 @@ function PurchaseForm({
       if (unitPrice) body.unit_price = Number(unitPrice);
       if (supplier.trim()) body.supplier = supplier.trim();
       if (lot.trim()) body.lot = lot.trim();
-      if (purchasedAt) body.purchased_at = purchasedAt;
+      // 날짜 입력(YYYY-MM-DD)을 백엔드가 요구하는 RFC3339 타임스탬프로 변환.
+      if (purchasedAt) body.purchased_at = new Date(purchasedAt).toISOString();
       const r = await Inventory.purchase(body);
       setOk(tr('inventoryCategory.purchaseOk', { name: r.name, qty: r.on_hand_qty, unit: r.unit }));
       setPurchaseId(r.purchase_id);
@@ -410,6 +557,78 @@ function ConsumeForm({
   );
 }
 
+// ── 구매(입고) 이력 리스트 ────────────────────────────────────────────────────
+
+function fmtDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(dateLocale(), {
+      year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function PurchaseHistoryList({ category, reloadKey }: { category: InventoryCategory; reloadKey: number }) {
+  const { tr } = useLanguage();
+  const [rows, setRows] = useState<PurchaseHistoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setErr(null);
+    Inventory.listPurchases(category, 50)
+      .then(r => { if (alive) setRows(r.items); })
+      .catch(e => { if (alive) setErr(friendlyError(e, tr)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, reloadKey]);
+
+  return (
+    <div className="bg-gradient-to-br from-gray-900 to-black border border-gray-700/40 rounded-lg p-4 space-y-2">
+      <h3 className="text-xs font-medium text-gray-400">{tr('inventoryPanel.purchaseHistoryTitle')}</h3>
+      {loading && <div className="text-xs text-gray-500">{tr('inventoryPanel.loading')}</div>}
+      {err && <div className="text-xs text-red-400 font-mono">{err}</div>}
+      {!loading && !err && rows.length === 0 && (
+        <div className="text-xs text-gray-500">{tr('inventoryPanel.purchaseHistoryEmpty')}</div>
+      )}
+      {rows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-gray-500 border-b border-gray-700/40">
+                <th className="text-left font-medium py-1 pr-2">{tr('inventoryPanel.colDate')}</th>
+                <th className="text-left font-medium py-1 pr-2">{tr('inventoryPanel.colItem')}</th>
+                <th className="text-right font-medium py-1 pr-2">{tr('inventoryPanel.colQty')}</th>
+                <th className="text-left font-medium py-1 pr-2">{tr('inventoryPanel.colSupplier')}</th>
+                <th className="text-left font-medium py-1 pr-2">{tr('inventoryPanel.colLot')}</th>
+                <th className="text-right font-medium py-1">{tr('inventoryPanel.colAmount')}</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {rows.map(p => (
+                <tr key={p.purchase_id} className="border-b border-gray-800/60 text-gray-300">
+                  <td className="py-1 pr-2 whitespace-nowrap text-gray-400">{fmtDate(p.purchased_at)}</td>
+                  <td className="py-1 pr-2">{p.name}</td>
+                  <td className="py-1 pr-2 text-right tabular-nums">{p.qty.toLocaleString(dateLocale())} {p.unit}</td>
+                  <td className="py-1 pr-2 text-gray-400 truncate max-w-[8rem]">{p.supplier || '—'}</td>
+                  <td className="py-1 pr-2 text-gray-500">{p.lot || '—'}</td>
+                  <td className="py-1 text-right tabular-nums text-gray-400">
+                    {p.total_price ? tr('inventoryPanel.amountKrw', { amount: p.total_price.toLocaleString(dateLocale()) }) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── InventoryCategoryPanel (exported) ────────────────────────────────────────
 
 export function InventoryCategoryPanel({
@@ -422,6 +641,7 @@ export function InventoryCategoryPanel({
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const accent = accentFor(category);
   const { tr } = useLanguage();
 
@@ -463,7 +683,7 @@ export function InventoryCategoryPanel({
         {items.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {items.map(it => (
-              <ItemCard key={it.item_id} item={it} accent={accent} />
+              <ItemCard key={it.item_id} item={it} accent={accent} onChanged={() => void load()} />
             ))}
           </div>
         )}
@@ -476,9 +696,12 @@ export function InventoryCategoryPanel({
           category={category}
           items={items}
           accent={accent}
-          onPurchased={() => void load()}
+          onPurchased={() => { void load(); setReloadKey(k => k + 1); }}
         />
       </div>
+
+      {/* 구매·입고 이력 */}
+      <PurchaseHistoryList category={category} reloadKey={reloadKey} />
 
       {/* 소모 폼 — material 전용 */}
       {category === 'material' && (

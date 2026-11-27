@@ -4,7 +4,7 @@ import { Farms, Sites } from '../lib/api';
 import type { Farm, Site, NewFarmBody, NewSiteBody } from '../lib/types';
 import { Card, CardContent } from './ui/card';
 import { Skeleton } from './ui/skeleton';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 type Tr = (key: string, vars?: Record<string, string | number>) => string;
 

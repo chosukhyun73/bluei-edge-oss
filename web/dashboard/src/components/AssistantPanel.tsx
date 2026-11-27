@@ -4,7 +4,7 @@ import { MessageCircle, X, Send, Loader2, RotateCcw } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Assistant, ApiError, type AssistantTurn } from '../lib/api';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 // 운영자 가이드 채팅 패널 — bluei-edge-assistant(26B)와 대화.
 // 헤더 '도움말' 버튼 → 우측 슬라이드 패널. 어느 탭에서든 열고 작업 화면은 유지.

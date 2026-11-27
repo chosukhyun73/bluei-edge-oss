@@ -18,16 +18,39 @@ type fakeRow struct {
 	eventType string
 	recAt     time.Time
 	json      string
+	metric    string
 }
 
 type fakeStore struct {
 	rows []fakeRow
 }
 
-func (f *fakeStore) SelectEventsOlderThan(_ context.Context, eventType string, cutoff time.Time, limit int) ([]storage.ArchivableEvent, error) {
+// matchMetric mirrors storage.metricPredicate semantics: Include 는 해당 metric 만,
+// Exclude 는 해당 metric 을 제외 (metric 없는 행은 Exclude 필터를 통과).
+func matchMetric(f storage.MetricFilter, metric string) bool {
+	if len(f.Include) > 0 {
+		found := false
+		for _, m := range f.Include {
+			if m == metric {
+				found = true
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	for _, m := range f.Exclude {
+		if m == metric {
+			return false
+		}
+	}
+	return true
+}
+
+func (f *fakeStore) SelectEventsOlderThan(_ context.Context, eventType string, filter storage.MetricFilter, cutoff time.Time, limit int) ([]storage.ArchivableEvent, error) {
 	var out []storage.ArchivableEvent
 	for _, r := range f.rows { // f.rows kept in ascending seq order
-		if r.eventType == eventType && r.recAt.Before(cutoff) {
+		if r.eventType == eventType && matchMetric(filter, r.metric) && r.recAt.Before(cutoff) {
 			out = append(out, storage.ArchivableEvent{Sequence: r.seq, RecordedAt: r.recAt, EventJSON: r.json})
 			if len(out) >= limit {
 				break
@@ -37,11 +60,11 @@ func (f *fakeStore) SelectEventsOlderThan(_ context.Context, eventType string, c
 	return out, nil
 }
 
-func (f *fakeStore) DeleteEventsOlderThanUpToSeq(_ context.Context, eventType string, cutoff time.Time, maxSeq int64) (int64, error) {
+func (f *fakeStore) DeleteEventsOlderThanUpToSeq(_ context.Context, eventType string, filter storage.MetricFilter, cutoff time.Time, maxSeq int64) (int64, error) {
 	var kept []fakeRow
 	var n int64
 	for _, r := range f.rows {
-		if r.eventType == eventType && r.recAt.Before(cutoff) && r.seq <= maxSeq {
+		if r.eventType == eventType && matchMetric(filter, r.metric) && r.recAt.Before(cutoff) && r.seq <= maxSeq {
 			n++
 			continue
 		}
@@ -81,13 +104,13 @@ func TestArchiveAndPrune_MonthlyPartitionAndDrain(t *testing.T) {
 	recent := time.Date(2026, 5, 23, 8, 0, 0, 0, time.UTC)
 
 	store := &fakeStore{rows: []fakeRow{
-		{1, "sensor.reading.recorded", apr, `{"event_id":"a1"}`},
-		{2, "sensor.reading.recorded", apr, `{"event_id":"a2"}`},
-		{3, "sensor.reading.recorded", may, `{"event_id":"m1"}`},
-		{4, "sensor.reading.recorded", may, `{"event_id":"m2"}`},
-		{5, "sensor.reading.recorded", may, `{"event_id":"m3"}`},
-		{6, "sensor.reading.recorded", recent, `{"event_id":"keep"}`}, // after cutoff → kept
-		{7, "device.health.updated", apr, `{"event_id":"h1"}`},        // different type → untouched
+		{seq: 1, eventType: "sensor.reading.recorded", recAt: apr, json: `{"event_id":"a1"}`},
+		{seq: 2, eventType: "sensor.reading.recorded", recAt: apr, json: `{"event_id":"a2"}`},
+		{seq: 3, eventType: "sensor.reading.recorded", recAt: may, json: `{"event_id":"m1"}`},
+		{seq: 4, eventType: "sensor.reading.recorded", recAt: may, json: `{"event_id":"m2"}`},
+		{seq: 5, eventType: "sensor.reading.recorded", recAt: may, json: `{"event_id":"m3"}`},
+		{seq: 6, eventType: "sensor.reading.recorded", recAt: recent, json: `{"event_id":"keep"}`}, // after cutoff → kept
+		{seq: 7, eventType: "device.health.updated", recAt: apr, json: `{"event_id":"h1"}`},        // different type → untouched
 	}}
 
 	w := NewWorker(store, Config{
@@ -98,7 +121,7 @@ func TestArchiveAndPrune_MonthlyPartitionAndDrain(t *testing.T) {
 	})
 
 	cutoff := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
-	n, err := w.archiveAndPrune(context.Background(), "sensor.reading.recorded", cutoff)
+	n, err := w.archiveAndPrune(context.Background(), "sensor.reading.recorded", storage.MetricFilter{}, cutoff)
 	if err != nil {
 		t.Fatalf("archiveAndPrune: %v", err)
 	}
@@ -130,12 +153,12 @@ func TestArchiveAndPrune_MonthlyPartitionAndDrain(t *testing.T) {
 func TestArchiveAndPrune_NoExpiredIsNoop(t *testing.T) {
 	dir := t.TempDir()
 	store := &fakeStore{rows: []fakeRow{
-		{1, "sensor.reading.recorded", time.Date(2026, 5, 23, 8, 0, 0, 0, time.UTC), `{"event_id":"keep"}`},
+		{seq: 1, eventType: "sensor.reading.recorded", recAt: time.Date(2026, 5, 23, 8, 0, 0, 0, time.UTC), json: `{"event_id":"keep"}`},
 	}}
 	w := NewWorker(store, Config{Enabled: true, ArchiveDir: dir, BatchSize: 100})
 
 	cutoff := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
-	n, err := w.archiveAndPrune(context.Background(), "sensor.reading.recorded", cutoff)
+	n, err := w.archiveAndPrune(context.Background(), "sensor.reading.recorded", storage.MetricFilter{}, cutoff)
 	if err != nil {
 		t.Fatalf("archiveAndPrune: %v", err)
 	}
@@ -148,6 +171,41 @@ func TestArchiveAndPrune_NoExpiredIsNoop(t *testing.T) {
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 0 {
 		t.Fatalf("expected no archive files, got %d", len(entries))
+	}
+}
+
+// Metric 필터: exclude 룰(수온 제외 1일)이 수온 행을 남기고, include 룰(수온 365일)이
+// 수온만 대상으로 하는지 — 이중 룰 분리 동작 검증.
+func TestArchiveAndPrune_MetricFilter(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	store := &fakeStore{rows: []fakeRow{
+		{seq: 1, eventType: "sensor.reading.recorded", metric: "water_temperature", recAt: old, json: `{"event_id":"t1"}`},
+		{seq: 2, eventType: "sensor.reading.recorded", metric: "ph", recAt: old, json: `{"event_id":"p1"}`},
+		{seq: 3, eventType: "sensor.reading.recorded", metric: "dissolved_oxygen", recAt: old, json: `{"event_id":"d1"}`},
+	}}
+	w := NewWorker(store, Config{Enabled: true, ArchiveDir: dir, BatchSize: 100})
+
+	cutoff := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
+	n, err := w.archiveAndPrune(context.Background(), "sensor.reading.recorded",
+		storage.MetricFilter{Exclude: []string{"water_temperature"}}, cutoff)
+	if err != nil {
+		t.Fatalf("archiveAndPrune(exclude): %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("exclude: expected 2 pruned, got %d", n)
+	}
+	if len(store.rows) != 1 || store.rows[0].metric != "water_temperature" {
+		t.Fatalf("exclude: expected only temp row kept, got %+v", store.rows)
+	}
+
+	n, err = w.archiveAndPrune(context.Background(), "sensor.reading.recorded",
+		storage.MetricFilter{Include: []string{"water_temperature"}}, cutoff)
+	if err != nil {
+		t.Fatalf("archiveAndPrune(include): %v", err)
+	}
+	if n != 1 || len(store.rows) != 0 {
+		t.Fatalf("include: expected temp row pruned, got n=%d rows=%+v", n, store.rows)
 	}
 }
 

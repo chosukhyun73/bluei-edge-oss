@@ -1,0 +1,19 @@
+[Unit]
+Description=bluei Ollama (GPU LLM, container bluei-ollama) — GPU 장치 정의(CDI) 준비 후 기동
+Documentation=file:///opt/bluei-edge/deploy/setup-ollama.sh
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=simple
+# 재부팅 직후 GPU 장치 정의(CDI)가 아직 없으면 컨테이너 시작이 실패한다(2026-08-17 사고).
+# 정의가 보일 때까지 최대 2분 기다린다.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do /usr/bin/nvidia-ctk cdi list 2>/dev/null | grep -q "nvidia.com/gpu=all" && exit 0; sleep 2; done; echo "CDI spec nvidia.com/gpu=all not ready"; exit 1'
+ExecStart=/usr/bin/docker start -a bluei-ollama
+ExecStop=/usr/bin/docker stop -t 30 bluei-ollama
+Restart=always
+RestartSec=15
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

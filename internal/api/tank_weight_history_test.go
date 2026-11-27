@@ -26,7 +26,7 @@ func newTestStoreWithWeightHistory(t *testing.T) storage.Store {
 	migDir := findMigDir(t)
 	for _, name := range []string{
 		"001_init.sql", "002_autonomous_mode.sql", "003_lifecycle.sql",
-		"004_sampling.sql", "005_fcr_calibration.sql", "006_decision_policy.sql",
+		"004_sampling.sql", "041_sampling_length.sql", "005_fcr_calibration.sql", "006_decision_policy.sql",
 		"007_weight_history.sql",
 		"030_traceability_lifecycle.sql",
 	} {

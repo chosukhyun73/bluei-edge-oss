@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Loader2, Smartphone, ShieldCheck } from 'lucide-react';
 import logoUrl from '../assets/bluei-logo.png';
 import { api, ApiError } from '../lib/api';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
+import { LanguageSelector } from './LanguageSelector';
 
 type Tr = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -93,7 +94,11 @@ export function DeviceLoginScreen({ onAuthenticated }: { onAuthenticated: () => 
   }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black px-6">
+    <div className="relative min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black px-6">
+      {/* 로그인 전에도 언어 선택 — 고른 언어는 localStorage 로 대시보드까지 유지 */}
+      <div className="absolute top-4 right-4">
+        <LanguageSelector />
+      </div>
       <div className="w-full max-w-sm flex flex-col items-center text-center">
         {/* 브랜드 (앱 로그인과 동일: 로고 배지 + bluei 워드마크) */}
         <img

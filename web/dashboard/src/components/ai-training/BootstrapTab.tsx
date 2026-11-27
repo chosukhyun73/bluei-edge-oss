@@ -1,22 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLanguage } from '../../lib/language-context';
-import { Cameras, Vision } from '../../lib/api';
+import { useLanguage } from '../../lib/language-core';
+import { Vision } from '../../lib/api';
 import type {
   VisionTrainingStatus,
-  Camera,
   VisionBootstrapBox,
 } from '../../lib/types';
-
-type BoxClass = 'fish' | 'food' | 'exclude';
-
-const CLASS_COLORS: Record<BoxClass, string> = {
-  fish: '#44d18a',
-  food: '#ffd166',
-  exclude: '#ff6b6b',
-};
+import {
+  BoxLabelCanvas, BoxClassSelect,
+  type BoxClass, type BoxLabelCanvasHandle,
+} from './BoxLabelCanvas';
 
 /**
- * 5/9 ai-training.js 의 ① 처음 알려주기 (박스 그리기) — React useRef + canvas.
+ * 5/9 ai-training.js 의 ① 처음 알려주기 (박스 그리기).
+ * 캔버스/클래스 셀렉터는 BoxLabelCanvas 공용 (③ 바닥 스틸 탭과 공유).
  *
  * 사용자가 카메라 스냅샷에서 마우스 드래그 → 박스 → [💾 저장] → POST bootstrap labels.
  * 좌표는 normalized [0,1] 로 저장 (5/9 원본과 동일).
@@ -29,163 +25,69 @@ export function BootstrapTab({
 }) {
   const { tr } = useLanguage();
 
-  const imgRef = useRef<HTMLImageElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawingRef = useRef<{ startX: number; startY: number } | null>(null);
+  const canvasRef = useRef<BoxLabelCanvasHandle>(null);
 
-  const [cameras, setCameras] = useState<Camera[]>([]);
-  const [cameraId, setCameraId] = useState<string>('');
+  // 저장된 clip 의 poster 프레임 1장을 라벨 대상으로 사용 (라이브 아님).
+  // 실제 급이는 라이브로 못 보므로 저장 영상을 사후에 확인·라벨링한다.
+  const [frame, setFrame] = useState<{ clipId: string; cameraId: string; tankId: string; offsetSec: number } | null>(null);
   const [boxClass, setBoxClass] = useState<BoxClass>('fish');
   const [boxes, setBoxes] = useState<VisionBootstrapBox[]>([]);
-  const [snapshotKey, setSnapshotKey] = useState<number>(Date.now());
-  const [statusText, setStatusText] = useState<string>(() => tr('bootstrapTab.selectCameraPrompt'));
+  const [statusText, setStatusText] = useState<string>(() => tr('bootstrapTab.loadingFrame'));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // 카메라 목록 로드 (5/9 loadCameras)
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await Cameras.list();
-        const items = (res.items ?? []).filter(c => (c.status ?? '') !== 'disabled');
-        setCameras(items);
-        if (items.length > 0) {
-          setCameraId(items[0].camera_id);
-        }
-      } catch (e) {
-        setError(tr('bootstrapTab.errorLoadCameras') + (e instanceof Error ? e.message : 'unknown'));
-      }
-    })();
-  }, []);
-
-  // 카메라 변경 → 새 스냅샷 (5/9 loadSnapshot)
-  useEffect(() => {
-    if (!cameraId) {
-      setStatusText(tr('bootstrapTab.selectCameraPrompt'));
-      return;
-    }
-    setBoxes([]);
-    setSnapshotKey(Date.now());
-    setStatusText(tr('bootstrap.statusSnapshotLoaded', { cameraId }));
-  }, [cameraId]);
-
-  // canvas 크기 동기화 + 박스 그리기 (5/9 redrawCanvas)
-  const redraw = useCallback(() => {
-    const img = imgRef.current;
-    const cv = canvasRef.current;
-    if (!img || !cv) return;
-    const w = img.clientWidth || img.naturalWidth;
-    const h = img.clientHeight || img.naturalHeight;
-    cv.width = w;
-    cv.height = h;
-    cv.style.width = `${w}px`;
-    cv.style.height = `${h}px`;
-    const ctx = cv.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, w, h);
-    for (const box of boxes) {
-      drawBox(ctx, box, w, h);
-    }
-  }, [boxes]);
-
-  // 박스 또는 스냅샷 변경 시 redraw
-  useEffect(() => {
-    redraw();
-    const onResize = () => redraw();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [redraw]);
-
-  function drawBox(
-    ctx: CanvasRenderingContext2D,
-    box: VisionBootstrapBox,
-    W: number, H: number,
-  ) {
-    const color = CLASS_COLORS[box.class];
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color + '33';
-    ctx.fillRect(box.x * W, box.y * H, box.w * W, box.h * H);
-    ctx.strokeRect(box.x * W, box.y * H, box.w * W, box.h * H);
-    ctx.fillStyle = color;
-    ctx.font = 'bold 14px Inter, sans-serif';
-    ctx.fillText(box.class, box.x * W + 4, box.y * H + 16);
-  }
-
-  function canvasMouse(ev: React.MouseEvent<HTMLCanvasElement>) {
-    const cv = canvasRef.current;
-    if (!cv) return { x: 0, y: 0 };
-    const rect = cv.getBoundingClientRect();
-    const x = (ev.clientX - rect.left) / rect.width;
-    const y = (ev.clientY - rect.top) / rect.height;
-    return {
-      x: Math.max(0, Math.min(1, x)),
-      y: Math.max(0, Math.min(1, y)),
-    };
-  }
-
-  function onMouseDown(ev: React.MouseEvent<HTMLCanvasElement>) {
-    const p = canvasMouse(ev);
-    drawingRef.current = { startX: p.x, startY: p.y };
-  }
-
-  function onMouseMove(ev: React.MouseEvent<HTMLCanvasElement>) {
-    if (!drawingRef.current) return;
-    const p = canvasMouse(ev);
-    const cv = canvasRef.current;
-    if (!cv) return;
-    redraw();
-    const ctx = cv.getContext('2d');
-    if (!ctx) return;
-    const W = cv.width, H = cv.height;
-    const x = Math.min(drawingRef.current.startX, p.x);
-    const y = Math.min(drawingRef.current.startY, p.y);
-    const w = Math.abs(p.x - drawingRef.current.startX);
-    const h = Math.abs(p.y - drawingRef.current.startY);
-    drawBox(ctx, { x, y, w, h, class: boxClass }, W, H);
-  }
-
-  function onMouseUp(ev: React.MouseEvent<HTMLCanvasElement>) {
-    if (!drawingRef.current) return;
-    const p = canvasMouse(ev);
-    const x = Math.min(drawingRef.current.startX, p.x);
-    const y = Math.min(drawingRef.current.startY, p.y);
-    const w = Math.abs(p.x - drawingRef.current.startX);
-    const h = Math.abs(p.y - drawingRef.current.startY);
-    if (w > 0.005 && h > 0.005) {
-      setBoxes(prev => [...prev, { x, y, w, h, class: boxClass }]);
-    }
-    drawingRef.current = null;
-  }
-
-  // 5/9 captureSnapshotJpeg
-  function captureSnapshotJpeg(): string | null {
-    const img = imgRef.current;
-    if (!img || !img.complete || img.naturalWidth === 0) return null;
-    const cv = document.createElement('canvas');
-    cv.width = img.naturalWidth;
-    cv.height = img.naturalHeight;
-    const ctx = cv.getContext('2d');
-    if (!ctx) return null;
+  // 저장된 clip 에서 랜덤 프레임 로드 — 급이영상 우선(사후 확인 목적), 없으면 안정성 영상.
+  // 시점 토글(수중/탑뷰): 7-05 에는 탑뷰 박스를 노이즈로 보고 수중 전용으로 제한했으나,
+  // 2026-07-09 운영자 결정으로 개방 — "라벨링은 하나 안하나 일단 자료가 모여야" (탑뷰
+  // 어체 마스킹 검출기 대비 축적). 시점별 라벨은 export 가 camera position 으로 분리
+  // 저장하므로 서로 오염되지 않는다 (export_labels.py --camera-position).
+  const [viewpoint, setViewpoint] = useState<'underwater' | 'top'>('underwater');
+  const loadRandomFrame = useCallback(async () => {
+    setError(null);
     try {
-      ctx.drawImage(img, 0, 0);
-      return cv.toDataURL('image/jpeg', 0.85);
-    } catch {
-      // canvas tainted (CORS) — backend 가 snapshot_ref 만으로 처리
-      return null;
+      // 서버가 셔플해 주므로 넉넉히 받아 선택 시점의 클립만 고른다.
+      let pick = (await Vision.trainingPool('feeding', 50)).items.find(it =>
+        it.payload.camera_id.includes(viewpoint));
+      if (!pick) {
+        pick = (await Vision.trainingPool('baseline', 50)).items.find(it =>
+          it.payload.camera_id.includes(viewpoint));
+      }
+      if (!pick) {
+        setFrame(null);
+        setStatusText(tr('bootstrapTab.noUnderwaterClips'));
+        return;
+      }
+      const p = pick.payload;
+      // 클립 내 랜덤 시점 — 포스터(녹화 시작 고정 1장)만 쓰면 같은 장면이 반복돼
+      // 프레임 다양성이 안 나온다 (2026-07-17). 가장자리 2초는 피한다.
+      let offsetSec = 0;
+      const durSec = (Date.parse(p.ended_at) - Date.parse(p.started_at)) / 1000;
+      if (Number.isFinite(durSec) && durSec > 6) {
+        offsetSec = Math.round((2 + Math.random() * (durSec - 4)) * 10) / 10;
+      }
+      setBoxes([]);
+      setFrame({ clipId: p.clip_id, cameraId: p.camera_id, tankId: p.tank_id ?? '', offsetSec });
+      setStatusText(tr('bootstrap.statusFrameLoaded', { tank: p.tank_id ?? '', cam: p.camera_id }));
+    } catch (e) {
+      setError(tr('bootstrapTab.errorLoadFrame') + (e instanceof Error ? e.message : 'unknown'));
     }
-  }
+  }, [tr, viewpoint]);
+
+  // 최초 진입 시 랜덤 프레임 로드.
+  useEffect(() => {
+    void loadRandomFrame();
+  }, [loadRandomFrame]);
 
   async function handleSave() {
     if (boxes.length === 0) {
       alert(tr('bootstrapTab.alertDrawBox'));
       return;
     }
-    if (!cameraId) {
-      alert(tr('bootstrapTab.alertSelectCamera'));
+    if (!frame) {
+      alert(tr('bootstrapTab.noClipsYet'));
       return;
     }
-    const image = captureSnapshotJpeg();
+    const image = canvasRef.current?.captureJpeg();
     if (!image) {
       alert(tr('bootstrapTab.alertSnapshotNotReady'));
       return;
@@ -194,8 +96,10 @@ export function BootstrapTab({
     setError(null);
     try {
       const res = await Vision.saveBootstrapLabel({
-        camera_id: cameraId,
-        snapshot_ref: `${cameraId}_${Date.now()}`,
+        camera_id: frame.cameraId,
+        snapshot_ref: frame.clipId,
+        origin_clip_id: frame.clipId,
+        frame_offset_sec: frame.offsetSec,
         operator_id: 'operator',
         boxes,
         image,
@@ -213,13 +117,12 @@ export function BootstrapTab({
   }
 
   function handleRefresh() {
-    setBoxes([]);
-    setSnapshotKey(Date.now());
-    setStatusText(tr('bootstrap.statusNewSnapshot', { cameraId }));
+    void loadRandomFrame();
   }
 
+  // 최근에 그린 박스 1개만 제거 (undo). 전체 삭제 아님.
   function handleClear() {
-    setBoxes([]);
+    setBoxes(prev => prev.slice(0, -1));
   }
 
   const boot = status?.bootstrap;
@@ -260,33 +163,25 @@ export function BootstrapTab({
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 p-2.5 bg-gray-900/40 border border-gray-700/40 rounded">
-        <label className="text-xs text-gray-400 flex items-center gap-1.5">
-          {tr('bootstrapTab.labelCameraSelect')}
-          <select
-            value={cameraId}
-            onChange={e => setCameraId(e.target.value)}
-            className="px-2 py-1 text-sm bg-gray-900 border border-gray-600 rounded text-white [&>option]:bg-gray-900 [&>option]:text-white"
-          >
-            <option value="">{tr('bootstrapTab.optionSelectCamera')}</option>
-            {cameras.map(c => (
-              <option key={c.camera_id} value={c.camera_id}>
-                {c.display_name ?? c.camera_id}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-gray-400 flex items-center gap-1.5">
-          {tr('bootstrapTab.labelClass')}
-          <select
-            value={boxClass}
-            onChange={e => setBoxClass(e.target.value as BoxClass)}
-            className="px-2 py-1 text-sm bg-gray-900 border border-gray-600 rounded text-white [&>option]:bg-gray-900 [&>option]:text-white"
-          >
-            <option value="fish">{tr('bootstrapTab.classFish')}</option>
-            <option value="food">{tr('bootstrapTab.classFood')}</option>
-            <option value="exclude">{tr('bootstrapTab.classExclude')}</option>
-          </select>
-        </label>
+        <span className="text-xs text-gray-400 font-mono">
+          {frame ? `📹 ${frame.tankId} · ${frame.cameraId}` : tr('bootstrapTab.noClipsYet')}
+        </span>
+        <div className="flex rounded overflow-hidden border border-gray-600/60">
+          {(['underwater', 'top'] as const).map(vp => (
+            <button
+              key={vp}
+              onClick={() => setViewpoint(vp)}
+              className={`px-2.5 py-1 text-xs transition-colors ${
+                viewpoint === vp
+                  ? 'bg-cyan-700 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              }`}
+            >
+              {vp === 'underwater' ? tr('bootstrapTab.viewUnderwater') : tr('bootstrapTab.viewTop')}
+            </button>
+          ))}
+        </div>
+        <BoxClassSelect value={boxClass} onChange={setBoxClass} />
         <button
           onClick={handleRefresh}
           className="px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
@@ -301,34 +196,27 @@ export function BootstrapTab({
         </button>
         <button
           onClick={handleSave}
-          disabled={saving || boxes.length === 0 || !cameraId}
+          disabled={saving || boxes.length === 0 || !frame}
           className="px-4 py-1.5 text-xs rounded font-medium bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white transition-colors"
         >
           {tr('bootstrapTab.btnSave')}
         </button>
       </div>
 
-      {/* Canvas wrap */}
-      <div className="relative bg-black border border-gray-700/40 rounded overflow-hidden" style={{ minHeight: 240 }}>
-        {cameraId && (
-          <img
-            key={snapshotKey}
-            ref={imgRef}
-            src={Cameras.snapshotURL(cameraId, 'sub', snapshotKey)}
-            alt={tr('bootstrapTab.altSnapshot')}
-            className="block w-full h-auto"
-            crossOrigin="anonymous"
-            onLoad={() => redraw()}
-          />
-        )}
-        <canvas
+      {/* Canvas */}
+      {frame ? (
+        <BoxLabelCanvas
           ref={canvasRef}
-          className="absolute inset-0 cursor-crosshair"
-          onMouseDown={onMouseDown}
-          onMouseMove={onMouseMove}
-          onMouseUp={onMouseUp}
+          src={`/v1/media/clips/${encodeURIComponent(frame.clipId)}/poster.jpg${frame.offsetSec > 0 ? `?offset=${frame.offsetSec}` : ''}`}
+          imgKey={`${frame.clipId}@${frame.offsetSec}`}
+          alt={tr('bootstrapTab.altSnapshot')}
+          boxClass={boxClass}
+          boxes={boxes}
+          onAddBox={box => setBoxes(prev => [...prev, box])}
         />
-      </div>
+      ) : (
+        <div className="bg-black border border-gray-700/40 rounded" style={{ minHeight: 240 }} />
+      )}
 
       {error && (
         <div className="px-3 py-2 bg-red-900/30 border border-red-500/40 rounded text-sm text-red-300 font-mono">

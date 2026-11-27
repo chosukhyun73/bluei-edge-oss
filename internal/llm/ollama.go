@@ -130,10 +130,22 @@ func (c *Client) Analyze(ctx context.Context, prompt string) (*Analysis, error) 
 	return a2, nil
 }
 
-// ChatTurn — 운영자 가이드 채팅의 한 메시지 (role: user|assistant).
+// ChatTurn — 운영자 가이드 채팅의 한 메시지 (role: user|assistant|tool).
+// ToolCalls 는 모델이 도구 호출을 요청한 assistant 턴에, ToolName 은 그 결과를
+// 돌려주는 tool 턴에 쓴다 (ollama /api/chat 네이티브 형식).
 type ChatTurn struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string     `json:"role"`
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	ToolName  string     `json:"tool_name,omitempty"`
+}
+
+// ToolCall — 모델이 요청한 도구 호출 1건.
+type ToolCall struct {
+	Function struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	} `json:"function"`
 }
 
 // nativeChatRequest — ollama 네이티브 /api/chat request.
@@ -141,18 +153,20 @@ type ChatTurn struct {
 // KeepAlive 로 모델을 GPU 에 상주시켜 콜드 재로딩 지연 제거.
 // (OpenAI 호환 /v1/chat/completions 는 think 파라미터 미지원이라 별도 경로.)
 type nativeChatRequest struct {
-	Model     string         `json:"model"`
-	Messages  []ChatTurn     `json:"messages"`
-	Stream    bool           `json:"stream"`
-	Think     bool           `json:"think"`
-	KeepAlive string         `json:"keep_alive,omitempty"`
-	Options   map[string]any `json:"options,omitempty"`
+	Model     string           `json:"model"`
+	Messages  []ChatTurn       `json:"messages"`
+	Stream    bool             `json:"stream"`
+	Think     bool             `json:"think"`
+	KeepAlive string           `json:"keep_alive,omitempty"`
+	Options   map[string]any   `json:"options,omitempty"`
+	Tools     []map[string]any `json:"tools,omitempty"`
 }
 
 // nativeChatChunk — stream:true 일 때 ollama 가 줄단위(NDJSON)로 보내는 청크.
 type nativeChatChunk struct {
 	Message struct {
-		Content string `json:"content"`
+		Content   string     `json:"content"`
+		ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	} `json:"message"`
 	Done bool `json:"done"`
 }
@@ -162,8 +176,28 @@ type nativeChatChunk struct {
 // model 이 비어있으면 c.fallback → "bluei-edge-assistant" 순으로 fallback.
 // keepAlive 가 비어있으면 ollama 기본값(5m). think:false 로 thinking 생략.
 func (c *Client) ChatStream(ctx context.Context, model, keepAlive string, messages []ChatTurn, onDelta func(string)) (string, error) {
+	content, _, err := c.ChatStreamTools(ctx, model, keepAlive, messages, nil, onDelta)
+	return content, err
+}
+
+// ChatStreamTools — ChatStream 과 같되 도구(tools)를 함께 넘긴다.
+// 모델이 도구 호출을 요청하면 그 목록을 반환한다(이때 content 는 대개 빈 문자열).
+// 호출자는 도구를 실행해 role="tool" 턴으로 결과를 붙인 뒤 다시 호출하면 된다.
+// tools 가 nil 이면 기존 자유 대화와 동일하게 동작한다.
+func (c *Client) ChatStreamTools(ctx context.Context, model, keepAlive string, messages []ChatTurn, tools []map[string]any, onDelta func(string)) (string, []ToolCall, error) {
+	content, calls, err := c.chatStreamRaw(ctx, model, keepAlive, messages, tools, onDelta)
+	if err != nil {
+		return content, calls, err
+	}
+	if content == "" && len(calls) == 0 {
+		return "", nil, errors.New("llm: empty assistant content")
+	}
+	return content, calls, nil
+}
+
+func (c *Client) chatStreamRaw(ctx context.Context, model, keepAlive string, messages []ChatTurn, tools []map[string]any, onDelta func(string)) (string, []ToolCall, error) {
 	if len(messages) == 0 {
-		return "", errors.New("llm: empty messages")
+		return "", nil, errors.New("llm: empty messages")
 	}
 	if model == "" {
 		model = c.fallback
@@ -183,15 +217,16 @@ func (c *Client) ChatStream(ctx context.Context, model, keepAlive string, messag
 			"num_ctx":     8192,
 			"num_predict": 1200,
 		},
+		Tools: tools,
 	}
 	bb, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("marshal: %w", err)
+		return "", nil, fmt.Errorf("marshal: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/api/chat", bytes.NewReader(bb))
 	if err != nil {
-		return "", fmt.Errorf("new request: %w", err)
+		return "", nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.authToken != "" {
@@ -200,16 +235,17 @@ func (c *Client) ChatStream(ctx context.Context, model, keepAlive string, messag
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("http: %w", err)
+		return "", nil, fmt.Errorf("http: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(buf)))
+		return "", nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(buf)))
 	}
 
 	var full strings.Builder
+	var calls []ToolCall
 	dec := json.NewDecoder(resp.Body)
 	for {
 		var chunk nativeChatChunk
@@ -217,7 +253,7 @@ func (c *Client) ChatStream(ctx context.Context, model, keepAlive string, messag
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return full.String(), fmt.Errorf("decode chunk: %w", err)
+			return full.String(), calls, fmt.Errorf("decode chunk: %w", err)
 		}
 		if chunk.Message.Content != "" {
 			full.WriteString(chunk.Message.Content)
@@ -225,16 +261,13 @@ func (c *Client) ChatStream(ctx context.Context, model, keepAlive string, messag
 				onDelta(chunk.Message.Content)
 			}
 		}
+		calls = append(calls, chunk.Message.ToolCalls...)
 		if chunk.Done {
 			break
 		}
 	}
 
-	content := strings.TrimSpace(full.String())
-	if content == "" {
-		return "", errors.New("llm: empty assistant content")
-	}
-	return content, nil
+	return strings.TrimSpace(full.String()), calls, nil
 }
 
 // embedResponse — ollama /api/embeddings 응답.

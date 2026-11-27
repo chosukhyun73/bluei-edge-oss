@@ -258,6 +258,22 @@ func scheduleView(sc *storage.FeedingSchedule) map[string]any {
 	if sc.Pattern.TargetAmountG != nil {
 		pattern["target_amount_g"] = *sc.Pattern.TargetAmountG
 	}
+	// 수온 급변 감산 근거 — 화면 배너가 "실제 적용된 계수"를 보여주는 데 쓴다 (2026-10-03).
+	// ⚠ 이 view 는 struct 를 그대로 marshal 하지 않고 map 을 손으로 만든다. 그래서
+	//   storage pattern 에 필드를 추가해도 여기에 넣지 않으면 응답에서 조용히 사라진다.
+	if f := sc.Pattern.ReductionFactor; f > 0 && f < 1.0 {
+		pattern["reduction_factor"] = f
+		pattern["reduction_reason"] = sc.Pattern.ReductionReason
+		if sc.Pattern.TempNowC != nil {
+			pattern["temp_now_c"] = *sc.Pattern.TempNowC
+		}
+		if sc.Pattern.Temp24hAgoC != nil {
+			pattern["temp_24h_ago_c"] = *sc.Pattern.Temp24hAgoC
+		}
+		if sc.Pattern.TargetBeforeCutG != nil {
+			pattern["target_before_cut_g"] = *sc.Pattern.TargetBeforeCutG
+		}
+	}
 	v := map[string]any{
 		"schedule_id": sc.ScheduleID,
 		"tank_ids":    sc.TankIDs,

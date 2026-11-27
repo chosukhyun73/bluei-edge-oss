@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { LLMAnalysis } from '../../lib/types';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 import { Button } from '../ui/button';
 
 // F.2 — LLM 종합 판단 결과 modal.
@@ -55,7 +55,7 @@ export function LLMAnalysisModal({ intentId, analysis, onApply, onClose }: LLMAn
   // Close on Escape — loading/applying 중에는 닫기 금지.
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && !applying && !loading) onClose();
+      if (e.key === 'Escape' && !applying) onClose();
     }
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
@@ -120,7 +120,7 @@ export function LLMAnalysisModal({ intentId, analysis, onApply, onClose }: LLMAn
           <button
             type="button"
             aria-label={tr('llmAnalysis.closeAriaLabel')}
-            disabled={applying || loading}
+            disabled={applying}
             onClick={onClose}
             className="text-gray-500 hover:text-white transition-colors text-lg leading-none disabled:opacity-50 flex-shrink-0"
           >

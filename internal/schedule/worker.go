@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
@@ -167,6 +168,10 @@ func (w *Worker) fireCycle(ctx context.Context, s *storage.FeedingSchedule) {
 		"gap_ms":            float64(gapMs),
 		"total_pulses":      float64(s.Pattern.TotalPulses),
 	}
+	// 회당 목표량 — fixed 사이클 마지막 펄스 트림용 (올림 과급 방지, 2026-07-07).
+	if s.Pattern.TargetAmountG != nil && *s.Pattern.TargetAmountG > 0 {
+		params["target_amount_g"] = *s.Pattern.TargetAmountG
+	}
 
 	// 2026-05-20: schedule.Priority 를 Arbiter Source 로 정확 매핑.
 	// 이전: 모든 schedule fire 가 SourceOperatorSchedule → arbiter 에 manual_override 로 기록.
@@ -182,6 +187,22 @@ func (w *Worker) fireCycle(ctx context.Context, s *storage.FeedingSchedule) {
 	}
 
 	for _, tankID := range s.TankIDs {
+		// 재시작 이중 발화 가드 (2026-07-07 14:00 실사고): 발화 이력(fired 맵)이
+		// 메모리에만 있어, 발화 직후 같은 분(HH:MM) 안에 재시작하면 새 프로세스가
+		// 같은 슬롯을 재발화한다(p1 중복 투입). DB 의 feed.cycle.started 최근 90초에
+		// 같은 수조 발화가 있으면 skip — 프로세스 수명과 무관하게 멱등.
+		if w.recentCycleStarted(ctx, tankID, 90*time.Second) {
+			w.log.Info("schedule: skipping fire — recent cycle already started (restart double-fire guard)",
+				"schedule_id", s.ScheduleID, "tank_id", tankID)
+			continue
+		}
+
+		// 결손 이월 폐지 (2026-08-23 운영자 지시). 종전에는 직전 사이클이
+		// safety_block 으로 조기 종료되면 못 쏜 펄스를 다음 사이클에 가산했다
+		// (2026-07-16 지시). 8-22 15:37 이 저쪽 502 로 5/8 발에서 멈추자 다음 날
+		// 첫 사이클이 11발(평소 1.4배)로 나갔고, 뒤쪽 펄스에서 rise −0.20(no)·
+		// unclear 가 나왔다. **못 나간 사료는 못 나간 것으로 두고 넘긴다.**
+		// 발화는 항상 스케줄 패턴 그대로이며 params 는 수조 간 그대로 공유된다.
 		if w.arbiter != nil {
 			// Arbiter 경유: 충돌 시 로그만 남기고 계속
 			dec, err := w.arbiter.Submit(ctx, arbiter.CycleRequest{
@@ -214,6 +235,9 @@ func (w *Worker) fireCycle(ctx context.Context, s *storage.FeedingSchedule) {
 			GapMs:           gapMs,
 			TotalPulses:     s.Pattern.TotalPulses,
 		}
+		if s.Pattern.TargetAmountG != nil && *s.Pattern.TargetAmountG > 0 {
+			p.TargetAmountG = *s.Pattern.TargetAmountG
+		}
 		cycle, err := w.fc.StartFixedCycle(ctx, tankID, "", p, "manual_override", "")
 		if err != nil {
 			w.log.Warn("schedule: start fixed cycle failed",
@@ -223,4 +247,28 @@ func (w *Worker) fireCycle(ctx context.Context, s *storage.FeedingSchedule) {
 		w.log.Info("schedule: feed cycle started",
 			"schedule_id", s.ScheduleID, "tank_id", tankID, "cycle_id", cycle.CycleID)
 	}
+}
+
+// recentCycleStarted — 이 수조의 feed.cycle.started 이벤트가 최근 window 안에 있는지.
+// 재시작 이중 발화 가드용 (조회 실패 시 false — 발화를 막지 않는 보수적 폴백).
+func (w *Worker) recentCycleStarted(ctx context.Context, tankID string, window time.Duration) bool {
+	since := time.Now().UTC().Add(-window)
+	evs, err := w.store.QueryEvents(ctx, storage.EventFilter{
+		EventType: "feed.cycle.started",
+		Since:     &since,
+		Limit:     50,
+	})
+	if err != nil {
+		w.log.Warn("schedule: recent cycle query failed", "tank_id", tankID, "error", err)
+		return false
+	}
+	for _, e := range evs {
+		var p struct {
+			TankID string `json:"tank_id"`
+		}
+		if json.Unmarshal([]byte(e.PayloadJSON), &p) == nil && p.TankID == tankID {
+			return true
+		}
+	}
+	return false
 }

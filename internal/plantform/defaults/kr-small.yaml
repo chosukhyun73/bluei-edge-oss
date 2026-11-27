@@ -1,0 +1,479 @@
+# 한국 소규모 HACCP 수산물 가공공장용 기본 기록 양식.
+# 정해진 양식은 없다 — 공장이 받아서 자기 판으로 고쳐 쓴다(docs/56 §18).
+# 문장은 이 저장소에서 새로 쓴 것이다. 인증원 표준 문구를 옮겨 싣지 않는다.
+# covers: 소규모 실시상황평가표 문항. P = 선행요건 1~17, H = HACCP 1~8.
+id: kr-small
+name: 한국 · 소규모 HACCP · 수산물 가공
+forms:
+  - id: daily_hygiene
+    name: 일일 위생·공정 점검표
+    kind: checklist
+    cycle: 매일
+    owner: HACCP 팀장
+    covers: [P1, P2, P3, P4, P6, P7, P9, P10, P12, P14, P15, P16]
+    deviation: true
+    signers: [점검자, 승인자]
+    sections:
+      - id: before
+        title: 작업 전
+        questions:
+          - {id: q_clothes, text: 위생복과 외출복을 따로 보관하고 있다}
+          - {id: q_health, text: 작업자 건강에 이상이 없고 장신구 없이 깨끗한 위생복을 입었다}
+          - {id: q_handwash, text: 손 씻는 설비가 정상이고 작업자가 손을 씻고 들어왔다}
+          - {id: q_pest_seal, text: 출입문·창·방충망에 틈이나 파손이 없다}
+          - {id: q_equip_before, text: 고장 나거나 파손된 설비가 없다}
+          - {id: q_cold_temp, text: "냉장창고 0~10℃, 냉동창고 -18℃ 이하를 지키고 있다"}
+      - id: during
+        title: 작업 중
+        questions:
+          - {id: q_zone, text: 청결구역 작업과 일반구역 작업이 섞이지 않는다}
+          - {id: q_ccp_run, text: CCP 공정을 기준대로 관리하고 있다}
+          - {id: q_pack, text: 완제품 포장 상태에 이상이 없다}
+          - {id: q_tool_clean, text: 온도계·타이머 등 모니터링 도구를 쓰기 전과 쓴 뒤에 세척·소독했다}
+      - id: after
+        title: 작업 후
+        questions:
+          - {id: q_waste, text: 폐기물을 정리해 정해진 곳에 두었고 제때 내보낸다}
+          - {id: q_clean, text: 바닥·배수로·식품이 닿는 설비 면을 청소·소독했다}
+          - {id: q_equip_after, text: 작업을 마친 설비에 고장이나 파손이 없다}
+          - {id: q_ccp_log, text: CCP 일지를 주기대로 썼고 이탈이 있었다면 개선조치를 했다}
+          - {id: q_store, text: 남은 원료·부재료를 구분해 밀봉 보관했다}
+      - id: receiving
+        title: 입고 시
+        questions:
+          - {id: q_receive, text: 들어온 원료·부재료의 성적서를 받았거나 눈으로 검사했다}
+      - id: shipping
+        title: 출하 시
+        questions:
+          - {id: q_ship, text: 운송함 안이 깨끗하고 출하 제품이 정한 온도를 지킨다}
+
+  - id: periodic_hygiene
+    name: 주기 위생·관리 점검표
+    kind: checklist
+    cycle: 매주 · 매월 · 분기 · 매년
+    owner: HACCP 팀장
+    covers: [P5, P6, P11, P13, H5, H7, H8]
+    deviation: true
+    signers: [점검자, 승인자]
+    sections:
+      - id: weekly
+        title: 매주
+        questions:
+          - {id: q_cold_clean, text: 냉장·냉동창고 안을 청소했다}
+          - {id: q_wall, text: 벽·천장 등 식품이 닿지 않는 면을 청소했다}
+          - {id: q_laundry, text: 위생복을 세탁했다}
+      - id: monthly
+        title: 매월
+        questions:
+          - {id: q_trap, text: 포충등·트랩을 점검하고 포획 수를 기록했다}
+          - {id: q_training, text: 위생·HACCP 교육을 하고 일지를 남겼다}
+          - {id: q_verify, text: CCP 검증 점검을 했다}
+      - id: quarterly
+        title: 분기
+        questions:
+          - {id: q_water, text: 사용하는 물의 수질을 확인했다}
+      - id: yearly
+        title: 매년
+        questions:
+          - {id: q_calibration, text: 온도계·저울·타이머·금속검출기의 검교정을 했다}
+          - {id: q_validation, text: 한계기준이 유효한지 평가했다}
+          - {id: q_plan_review, text: HACCP 관리기준서를 다시 검토하고 바뀐 점을 반영했다}
+
+  - id: ccp_sanitize
+    name: CCP 모니터링 일지 (소독·헹굼)
+    kind: log
+    cycle: 작업할 때마다
+    owner: CCP 모니터링 담당
+    covers: [H4, H6]
+    deviation: true
+    signers: [점검자, 승인자]
+    blank_rows: 10
+    notes:
+      - {label: 한계기준, text: "이 공장의 한계기준을 적는다 (소독 농도·시간, 헹굼 잔류 농도·시간)"}
+      - {label: 방법, text: 담당자가 농도와 시간을 재서 바로 적는다}
+      - {label: 개선조치, text: 기준을 벗어나면 작업을 멈추고 해당 제품을 보류한다. 농도·시간을 다시 맞춘 뒤 다시 처리한다. 팀장에게 알리고 아래 칸에 기록한다}
+    columns:
+      - {id: c_time, name: 측정 시각}
+      - {id: c_step, name: 공정 (소독/헹굼)}
+      - {id: c_item, name: 품명, width: 1.5}
+      - {id: c_ppm, name: 농도 (ppm)}
+      - {id: c_sec, name: 시간}
+      - {id: c_water, name: 물 양 (L)}
+      - {id: c_qty, name: 투입량 (kg)}
+      - {id: c_result, name: 판정}
+      - {id: c_sign, name: 서명}
+
+  - id: ccp_heating
+    name: CCP 모니터링 일지 (가열)
+    kind: log
+    cycle: 가열 작업할 때마다
+    owner: CCP 모니터링 담당
+    covers: [H4, H6]
+    deviation: true
+    signers: [점검자, 승인자]
+    blank_rows: 10
+    notes:
+      - {label: 한계기준, text: "이 공장의 한계기준을 적는다 (품목별 가열 온도·시간, 품온)"}
+      - {label: 방법, text: 담당자가 가열 온도와 시간을 확인하고 온도계로 품온을 재서 바로 적는다}
+      - {label: 개선조치, text: 온도나 시간이 모자라면 작업을 멈추고 해당 제품을 보류한다. 온도·시간을 다시 맞춘 뒤 다시 가열하고 품온을 확인한다. 팀장에게 알리고 아래 칸에 기록한다}
+    columns:
+      - {id: c_item, name: 품명, width: 1.5}
+      - {id: c_time, name: 측정 시각}
+      - {id: c_oven, name: 가열 온도 (℃)}
+      - {id: c_core, name: 품온 (℃)}
+      - {id: c_start, name: 시작}
+      - {id: c_end, name: 종료}
+      - {id: c_dur, name: 걸린 시간}
+      - {id: c_result, name: 판정}
+      - {id: c_sign, name: 서명}
+
+  - id: ccp_metal
+    name: CCP 모니터링 일지 (금속검출)
+    kind: log
+    cycle: 작업 시작 전 · 작업 중 1시간마다 · 작업 종료 후
+    owner: CCP 모니터링 담당
+    covers: [H4, H6]
+    deviation: true
+    signers: [점검자, 승인자]
+    blank_rows: 10
+    notes:
+      - {label: 한계기준, text: "이 공장의 한계기준을 적는다 (시험편 종류와 크기, 불검출)"}
+      - {label: 방법, text: "시험편만, 제품만, 시험편과 제품을 함께 통과시켜 검출 여부를 적는다 (검출 O, 불검출 X)"}
+      - {label: 개선조치, text: 금속이 나오거나 감도가 이상하면 작업을 멈추고 해당 제품을 보류한다. 원인을 없앤 뒤 마지막 정상 확인 이후 제품을 다시 검사한다. 팀장에게 알리고 아래 칸에 기록한다}
+    columns:
+      - {id: c_item, name: 품명, width: 1.5}
+      - {id: c_time, name: 통과 시각}
+      - {id: c_fe, name: Fe만}
+      - {id: c_sts, name: STS만}
+      - {id: c_prod, name: 제품만}
+      - {id: c_fe_prod, name: Fe+제품}
+      - {id: c_sts_prod, name: STS+제품}
+      - {id: c_result, name: 판정}
+      - {id: c_sign, name: 서명}
+
+  - id: ccp_verification
+    name: CCP 검증 점검표
+    kind: checklist
+    cycle: 매월
+    owner: HACCP 팀장
+    covers: [H7]
+    deviation: true
+    signers: [점검자, 승인자]
+    notes:
+      - {label: 현장 관찰, text: "관찰한 날짜·시각:                         면담한 담당자·날짜:"}
+    sections:
+      - id: v_sanitize
+        title: 소독·헹굼
+        questions:
+          - {id: v_s_limit, text: 담당자가 한계기준을 알고 있다}
+          - {id: v_s_method, text: 정한 방법과 주기대로 재고 있다}
+          - {id: v_s_log, text: 일지가 빠짐없이 적혀 있고 서명이 있다}
+          - {id: v_s_action, text: 이탈이 있었던 날은 개선조치 기록이 있다}
+      - id: v_heating
+        title: 가열
+        questions:
+          - {id: v_h_limit, text: 담당자가 한계기준을 알고 있다}
+          - {id: v_h_method, text: 정한 방법과 주기대로 재고 있다}
+          - {id: v_h_tool, text: 온도계와 타이머가 검교정 기한 안에 있다}
+          - {id: v_h_log, text: 일지가 빠짐없이 적혀 있고 서명이 있다}
+          - {id: v_h_action, text: 이탈이 있었던 날은 개선조치 기록이 있다}
+      - id: v_metal
+        title: 금속검출
+        questions:
+          - {id: v_m_limit, text: 담당자가 한계기준을 알고 있다}
+          - {id: v_m_method, text: 정한 주기대로 시험편으로 감도를 확인하고 있다}
+          - {id: v_m_log, text: 일지가 빠짐없이 적혀 있고 서명이 있다}
+          - {id: v_m_action, text: 이탈이 있었던 날은 개선조치 기록이 있다}
+
+  - id: training_plan
+    name: 연간 교육훈련 계획서
+    kind: log
+    cycle: 매년
+    owner: HACCP 팀장
+    covers: [H8]
+    deviation: false
+    signers: [작성자, 승인자]
+    rows: [1월, 2월, 3월, 4월, 5월, 6월, 7월, 8월, 9월, 10월, 11월, 12월]
+    columns:
+      - {id: c_month, name: 월, width: 0.6}
+      - {id: c_topic, name: 교육 주제, width: 3}
+      - {id: c_target, name: 대상}
+      - {id: c_teacher, name: 교육자}
+      - {id: c_done, name: 실시일}
+
+  - id: training_record
+    name: 교육훈련 일지
+    kind: sheet
+    cycle: 매월
+    owner: HACCP 팀장
+    covers: [H8]
+    deviation: false
+    signers: [작성자, 승인자]
+    fields:
+      - {id: f_when, label: 일시}
+      - {id: f_where, label: 장소}
+      - {id: f_teacher, label: 교육자}
+      - {id: f_type, label: 구분 (내부·외부)}
+      - {id: f_topic, label: 교육 주제}
+      - {id: f_content, label: 교육 내용 요약, lines: 6}
+      - {id: f_material, label: 교재·자료}
+      - {id: f_attend, label: 참석자 이름과 서명, lines: 5}
+      - {id: f_result, label: 교육 뒤 확인한 것, lines: 2}
+
+  - id: receiving_inspection
+    name: 원료 입고·육안검사 일지
+    kind: log
+    cycle: 입고할 때마다
+    owner: 입고 담당
+    covers: [P14]
+    deviation: false
+    signers: [점검자, 승인자]
+    blank_rows: 12
+    columns:
+      - {id: c_date, name: 입고일}
+      - {id: c_item, name: 품명, width: 1.4}
+      - {id: c_supplier, name: 공급처, width: 1.2}
+      - {id: c_qty, name: 수량}
+      - {id: c_origin, name: 원산지}
+      - {id: c_cert, name: 성적서}
+      - {id: c_expiry, name: 기한 표시}
+      - {id: c_vehicle, name: 차량·운송함}
+      - {id: c_temp, name: 온도 (℃)}
+      - {id: c_look, name: 상태·이물}
+      - {id: c_result, name: 적합}
+      - {id: c_action, name: 부적합 조치, width: 1.4}
+
+  - id: material_ledger
+    name: 원료수불부 및 제품생산 일지
+    kind: log
+    cycle: 매일
+    owner: 생산 담당
+    covers: []
+    deviation: false
+    signers: [작성자, 승인자]
+    blank_rows: 12
+    columns:
+      - {id: c_date, name: 날짜}
+      - {id: c_product, name: 제품명, width: 1.6}
+      - {id: c_report_no, name: 품목제조보고번호, width: 1.4}
+      - {id: c_made, name: 생산량}
+      - {id: c_material, name: 원료명, width: 1.4}
+      - {id: c_prev, name: 전일 재고}
+      - {id: c_in, name: 입고}
+      - {id: c_used, name: 사용}
+      - {id: c_left, name: 당일 재고}
+
+  - id: production_sales
+    name: 제품 생산·판매 일지
+    kind: log
+    cycle: 매일
+    owner: 출하 담당
+    covers: []
+    deviation: false
+    signers: [작성자, 승인자]
+    blank_rows: 14
+    columns:
+      - {id: c_date, name: 날짜}
+      - {id: c_product, name: 제품명, width: 2}
+      - {id: c_lot, name: 제조일·lot}
+      - {id: c_made, name: 생산량}
+      - {id: c_sold, name: 판매량}
+      - {id: c_buyer, name: 판매처, width: 1.6}
+      - {id: c_left, name: 재고}
+
+  - id: stock_count
+    name: 재고조사표
+    kind: log
+    cycle: 매월
+    owner: 생산 담당
+    covers: []
+    deviation: false
+    signers: [작성자, 승인자]
+    blank_rows: 14
+    columns:
+      - {id: c_item, name: 품목, width: 2}
+      - {id: c_spec, name: 규격}
+      - {id: c_in, name: 입고}
+      - {id: c_out, name: 출고}
+      - {id: c_left, name: 재고}
+      - {id: c_note, name: 비고, width: 1.5}
+
+  - id: cold_storage_temp
+    name: 냉장·냉동창고 온도 점검 일지
+    kind: log
+    cycle: 매일
+    owner: 생산 담당
+    covers: [P12]
+    deviation: false
+    signers: [점검자, 승인자]
+    blank_rows: 16
+    notes:
+      - {label: 기준, text: "냉장창고 0~10℃, 냉동창고 -18℃ 이하"}
+    columns:
+      - {id: c_date, name: 날짜}
+      - {id: c_time, name: 점검 시각}
+      - {id: c_chill, name: 냉장창고 (℃)}
+      - {id: c_freeze, name: 냉동창고 (℃)}
+      - {id: c_by, name: 점검자}
+      - {id: c_action, name: 기준을 벗어났을 때 조치, width: 2.5}
+
+  - id: waste_log
+    name: 폐기물 처리 일지
+    kind: log
+    cycle: 내보낼 때마다
+    owner: 생산 담당
+    covers: [P6]
+    deviation: false
+    signers: [작성자, 승인자]
+    blank_rows: 14
+    columns:
+      - {id: c_date, name: 날짜}
+      - {id: c_kind, name: 종류, width: 1.5}
+      - {id: c_amount, name: 양}
+      - {id: c_how, name: 처리 방법·업체, width: 2}
+      - {id: c_by, name: 담당}
+
+  - id: pest_check
+    name: 방충·방서 점검표
+    kind: log
+    cycle: 매주
+    owner: HACCP 팀장
+    covers: [P5]
+    deviation: true
+    signers: [점검자, 승인자]
+    blank_rows: 14
+    notes:
+      - {label: 방법, text: "포충등·트랩마다 한 줄씩, 잡힌 수를 종류별로 적는다"}
+    columns:
+      - {id: c_device, name: 설비, width: 1.4}
+      - {id: c_place, name: 설치 위치, width: 1.6}
+      - {id: c_fly, name: 날벌레}
+      - {id: c_crawl, name: 기는 벌레}
+      - {id: c_rodent, name: 쥐}
+      - {id: c_total, name: 합계}
+      - {id: c_note, name: 관리 사항, width: 2}
+
+  - id: calibration_list
+    name: 검교정 대상 목록
+    kind: log
+    cycle: 매년
+    owner: HACCP 팀장
+    covers: [P11, H5]
+    deviation: false
+    signers: [작성자, 승인자]
+    blank_rows: 10
+    columns:
+      - {id: c_tool, name: 장비, width: 2}
+      - {id: c_kind, name: 공인·자체}
+      - {id: c_official, name: 공인기관 검교정일}
+      - {id: c_self, name: 자체 검교정일}
+      - {id: c_next, name: 다음 예정일}
+      - {id: c_note, name: 비고, width: 1.5}
+
+  - id: calibration_record
+    name: 자체 검교정 일지
+    kind: sheet
+    cycle: 매년
+    owner: HACCP 팀장
+    covers: [P11, H5]
+    deviation: true
+    signers: [작성자, 승인자]
+    notes:
+      - {label: 방법, text: 공인기관에서 검교정 받은 기준 장비와 나란히 놓고 같은 조건에서 값을 비교한다}
+    fields:
+      - {id: f_tool, label: 검교정한 장비}
+      - {id: f_date, label: 실시일}
+      - {id: f_ref, label: 기준 장비 (성적서 번호)}
+      - {id: f_limit, label: 판정 기준 (허용 오차)}
+      - {id: f_values, label: 기준 장비 값 / 대상 장비 값 / 차이, lines: 3}
+      - {id: f_result, label: 판정}
+      - {id: f_photo, label: 사진·성적서 첨부, lines: 2}
+
+  - id: water_check
+    name: 용수 관리 점검 일지
+    kind: log
+    cycle: 분기 (저수조는 반기마다 청소)
+    owner: HACCP 팀장
+    covers: [P13]
+    deviation: false
+    signers: [점검자, 승인자]
+    blank_rows: 8
+    notes:
+      - {label: 참고, text: 상수도만 쓰고 저수조가 없으면 수질검사 대상이 아니다. 그 사실을 비고에 적어 둔다}
+    columns:
+      - {id: c_date, name: 날짜}
+      - {id: c_source, name: 물 종류}
+      - {id: c_check, name: 확인한 것, width: 2.5}
+      - {id: c_result, name: 결과}
+      - {id: c_by, name: 점검자}
+      - {id: c_note, name: 비고, width: 1.5}
+
+  - id: complaint_record
+    name: 소비자 불만 관리 일지
+    kind: sheet
+    cycle: 생길 때마다
+    owner: HACCP 팀장
+    covers: [P8, P17]
+    deviation: false
+    signers: [작성자, 승인자]
+    fields:
+      - {id: f_date, label: 접수일}
+      - {id: f_who, label: 신고자·연락처}
+      - {id: f_product, label: 제품명·제조일·lot}
+      - {id: f_what, label: 불만 내용, lines: 3}
+      - {id: f_cause, label: 조사한 원인, lines: 3}
+      - {id: f_action, label: 조치와 재발 방지, lines: 3}
+      - {id: f_recall, label: 회수 여부와 범위, lines: 2}
+      - {id: f_photo, label: 사진 첨부, lines: 2}
+
+  - id: equipment_history
+    name: 제조설비 이력
+    kind: log
+    cycle: 바뀔 때마다
+    owner: HACCP 팀장
+    covers: [P10]
+    deviation: false
+    signers: [작성자, 승인자]
+    blank_rows: 12
+    columns:
+      - {id: c_place, name: 설치 위치}
+      - {id: c_name, name: 설비명, width: 1.6}
+      - {id: c_maker, name: 제조사}
+      - {id: c_model, name: 모델·규격}
+      - {id: c_date, name: 들인 날}
+      - {id: c_repair, name: 수리·교체 이력, width: 2.5}
+
+  - id: air_filter
+    name: 압축공기 필터 관리대장
+    kind: log
+    cycle: 매월
+    owner: HACCP 팀장
+    covers: [P10]
+    deviation: false
+    signers: [작성자, 승인자]
+    blank_rows: 6
+    notes:
+      - {label: 대상, text: 식품·포장재·식품이 닿는 면에 압축공기를 쓰는 곳의 필터}
+    columns:
+      - {id: c_place, name: 설치 위치}
+      - {id: c_use, name: 용도}
+      - {id: c_model, name: 제품명·규격, width: 1.6}
+      - {id: c_set, name: 설치일}
+      - {id: c_cycle, name: 교체 주기}
+      - {id: c_changed, name: 교체한 날, width: 2}
+
+  - id: health_cert
+    name: 건강진단(보건증) 현황
+    kind: log
+    cycle: 매년
+    owner: HACCP 팀장
+    covers: []
+    deviation: false
+    signers: [작성자, 승인자]
+    blank_rows: 10
+    columns:
+      - {id: c_name, name: 이름, width: 1.5}
+      - {id: c_role, name: 맡은 일, width: 1.5}
+      - {id: c_checked, name: 검진일}
+      - {id: c_next, name: 다음 검진 기한}
+      - {id: c_note, name: 비고, width: 1.5}

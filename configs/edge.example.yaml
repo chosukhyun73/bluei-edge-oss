@@ -41,8 +41,16 @@ retention:
   initial_delay_sec: 120
   archive_dir: ""            # 빈 값이면 sqlite 경로 디렉터리/archive 사용
   rules:
-    # 센서 측정값: 최근 24~48h raw 보존(차트용), 그 이전은 일별 min/max/avg 요약만 남기고 raw 삭제.
+    # 수온 raw: 1년 보존 — 연안(취수) 수온 대비 수조 수온 상관 분석, 냉수대 도래 vs
+    # 저수온대 유지 판별, 냉각 에너지 예측에 연간 주기 전체가 필요 (2026-07-18 운영자).
+    # 용량 ~1MB/일. 1년 경과분은 여전히 archive 로 export 후 제거 + 일별 요약 보존.
     - event_type: sensor.reading.recorded
+      metrics: [water_temperature]
+      keep_days: 365
+      aggregate_daily: true
+    # 그 외 센서 측정값: 최근 24~48h raw 보존(차트용), 그 이전은 일별 min/max/avg 요약만 남기고 raw 삭제.
+    - event_type: sensor.reading.recorded
+      exclude_metrics: [water_temperature]
       keep_days: 1
       aggregate_daily: true
     # 장비 헬스: 24시간 지나면 삭제 (요약 없음).
@@ -414,8 +422,9 @@ sync:
   node_code: ""                     # 앱에서 등록한 node_code (X-GX10-Node 헤더로 전송)
   access_token: ""                  # 앱이 발급한 GX10 노드 토큰(1회 표시; user JWT 아님)
   daily_cron_kst: ""                # "HH:MM" KST. 비어있으면 daily 트리거 비활성. 운영: "03:00"
-  batch_size: 1000
-  http_timeout_sec: 60
+  sync_interval_min: 30             # 주기 동기화(분). 부팅 +30s 첫 동기화 + 이후 30분마다. 0 → 비활성
+  batch_size: 10                      # collapse 후 ~17건. 30초 백엔드 타임아웃 도중종료(리소스 고갈) 방지 — 작게 완료
+  http_timeout_sec: 90
   retry:
     min_backoff_sec: 30
     max_backoff_sec: 900

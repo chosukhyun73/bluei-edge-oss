@@ -1,9 +1,10 @@
+import { t } from './i18n';
 import type {
-  Group, Tank, StateVector, WeightHistoryResponse, Camera, AlertOpen,
+  Group, Tank, StateVector, WeightHistoryResponse, FCRStatusResponse, SamplingResponse, Camera, AlertOpen,
   Farm, Site, WaterTreatmentGroup,
   Controller, ControllerStatus,
   Actuator, Sensor, SpeciesProfile,
-  FeedCycle, NewCycleBody,
+  FeedCycle, NewCycleBody, FeedCycleReport,
   FeedingSchedule, NewScheduleBody,
   OperatorIntent, NewIntentBody, LLMAnalysis,
   EnvironmentalSnapshot,
@@ -22,14 +23,17 @@ import type {
   SensorModel, NewSensorModelBody,
   ActuatorModel, NewActuatorModelBody,
   VisionAlgorithmsResponse, VisionTankApplicationsResponse,
-  VisionObservationsResponse, VisionTrainingStatus,
+  VisionObservationsResponse, VisionAgitationRecentResponse, VisionAgitationBaselineResponse, VisionAgitationLiveResponse,
+  VisionModelScoresResponse, VisionTrainingStatus,
   VisionTrainingJobsResponse, VisionBootstrapLabelsResponse,
   VisionTrainingStartBody, VisionTrainingJob, VisionBootstrapSaveBody,
-  VisionTrainingPoolResponse, CaptureDiskResponse,
+  VisionTrainingPoolResponse, VisionAgitationResponse, CaptureDiskResponse,
   VisionAlgorithmActiveState, VisionAlgorithmApplyResponse,
   VisionObservationDisputeBody, VisionObservationDisputeResponse,
+  VisionSegmentsResponse, VisionSegmentLabelSaveBody, VisionSegmentLabelSaveResponse,
   TraceabilityDoc,
   InventoryListResponse, NewInventoryItemBody, PurchaseBody, ConsumeBody,
+  InventoryItem, FeedComposition, PurchaseHistoryItem,
   Partner, NewPartnerBody, PartnersListResponse,
   SiteStocking, NewSiteStockingBody, SiteStockingsListResponse,
   SiteHarvest, NewSiteHarvestBody, SiteHarvestsListResponse,
@@ -38,6 +42,7 @@ import type {
   LarvalBatch, NewLarvalBatchBody,
   LiveFeedCulture, NewLiveFeedBody,
   HatcheryTreatment, NewHatcheryTreatmentBody,
+  HopperEstimate,
 } from './types';
 
 // 빈 문자열 default — Vite proxy 가 /v1/* 을 8080 으로 forward (vite.config.ts).
@@ -56,26 +61,44 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, {
-    headers: { 'content-type': 'application/json' },
-    ...init,
-  });
-  if (!res.ok) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let body: any = null;
-    try { body = await res.json(); } catch { /* ignore parse error */ }
-    const err = body?.error ?? {};
-    const { code: _c, message: _m, ...rest } = err;
-    void _c; void _m;
-    throw new ApiError(
-      err.code ?? 'HTTP_ERROR',
-      err.message ?? res.statusText,
-      res.status,
-      Object.keys(rest).length > 0 ? (rest as Record<string, unknown>) : undefined,
-    );
+// 요청이 응답 없이 무한 대기하는 것을 막는 안전장치. 카메라 MJPEG 스트림이 연결 풀을
+// 소진하는 등의 이유로 요청이 멈추면, 타임아웃으로 중단해 컴포넌트가 무한 로딩(skeleton)에
+// 갇히지 않고 에러로 떨어지게 한다. 정상 API 는 수십 ms 라 오탐 없음. 오래 걸릴 수 있는
+// 호출(예: ONVIF discover)은 caller 가 init.signal 로 자체 제어하면 이 타임아웃을 우회한다.
+const API_TIMEOUT_MS = 20000;
+
+export async function api<T>(path: string, init?: RequestInit, timeoutMs: number = API_TIMEOUT_MS): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(BASE + path, {
+      headers: { 'content-type': 'application/json' },
+      ...init,
+      signal: init?.signal ?? controller.signal,
+    });
+    if (!res.ok) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let body: any = null;
+      try { body = await res.json(); } catch { /* ignore parse error */ }
+      const err = body?.error ?? {};
+      const { code: _c, message: _m, ...rest } = err;
+      void _c; void _m;
+      throw new ApiError(
+        err.code ?? 'HTTP_ERROR',
+        err.message ?? res.statusText,
+        res.status,
+        Object.keys(rest).length > 0 ? (rest as Record<string, unknown>) : undefined,
+      );
+    }
+    return (await res.json()) as T;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError('TIMEOUT', t('api.timeoutError', { s: timeoutMs / 1000, path }), 0);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 // 운영자 의도적 graceful 종료 (GX10 전원 끄기 직전용).
@@ -156,8 +179,38 @@ export const Tanks = {
   },
   stateVector: (tid: string) =>
     api<StateVector>(`/v1/tanks/${encodeURIComponent(tid)}/state-vector`),
+  // 자율 모드 설정 (off/observation/partial/full). off 외 전환은 reason 필수.
+  setAutonomousMode: (tid: string, mode: string, reason: string, operatorId = 'operator') =>
+    api<{ ok: boolean; no_change?: boolean }>(
+      `/v1/tanks/${encodeURIComponent(tid)}/autonomous-mode`,
+      { method: 'POST', body: JSON.stringify({ mode, reason, operator_id: operatorId }) },
+    ),
+  // 호퍼 잔량 원장 (2026-07-17) — remaining_g_est=null 이면 보충 기록 없음(추정 불가)
+  hopper: (tid: string) =>
+    api<HopperEstimate>(`/v1/tanks/${encodeURIComponent(tid)}/hopper`),
+  hopperRefill: (tid: string, amountG: number, note?: string) =>
+    api<{ ok: boolean; hopper?: HopperEstimate }>(
+      `/v1/tanks/${encodeURIComponent(tid)}/hopper/refill`,
+      { method: 'POST', body: JSON.stringify({ amount_g: amountG, note: note ?? '' }) },
+    ),
   weightHistory: (tid: string, days = 30) =>
     api<WeightHistoryResponse>(`/v1/tanks/${encodeURIComponent(tid)}/weight-history?days=${days}`),
+  // 실측중량 샘플링 (2026-07-18) — GET 이력 조회 / POST 실측 기록.
+  sampling: (tid: string) =>
+    api<SamplingResponse>(`/v1/tanks/${encodeURIComponent(tid)}/sampling`),
+  recordSampling: (tid: string, body: { avg_weight_g: number; sampled_count: number; sampled_at?: string }) =>
+    api<{ ok: boolean; sampling_id: string; avg_weight_g: number; sampled_at: string }>(
+      `/v1/tanks/${encodeURIComponent(tid)}/sampling`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  // FCR 직접 입력 (2026-07-17) — 추정 평균중량 override. GET = 현재 값+default 조회.
+  fcr: (tid: string) =>
+    api<FCRStatusResponse>(`/v1/tanks/${encodeURIComponent(tid)}/fcr`),
+  setFCR: (tid: string, fcr: number, note?: string) =>
+    api<{ ok: boolean; calibrated_fcr: number; default_fcr: number; deviation_pct: number; source: string }>(
+      `/v1/tanks/${encodeURIComponent(tid)}/fcr`,
+      { method: 'POST', body: JSON.stringify({ fcr, note: note ?? '' }) },
+    ),
   create: (body: NewTankBody) =>
     api<{ ok: boolean; item: Tank }>('/v1/tanks', {
       method: 'POST', body: JSON.stringify(body),
@@ -212,6 +265,125 @@ export type PartnerDocUploadResponse = {
   ok: boolean;
   document_id: string;
   download_url: string;
+};
+
+export type WQBucket = {
+  bucket_start: string;
+  temperature_c_avg: number | null;
+  ph_avg: number | null;
+  do_mg_l_avg: number | null;
+  sample_count: number;
+};
+
+// 외부 환경 시계열 (NIFS 연안 수온 — 수취구 권역, 2026-07-17)
+export const ExternalEnv = {
+  list: (hours = 24) =>
+    api<{ items: { observed_at: string; value: number; metric: string; station_cd: string; station_name: string }[] }>(
+      `/v1/external-env?hours=${hours}`,
+    ),
+};
+
+// 해상 장기 환경 일별 (최대 2년, 2026-11-17)
+export type EnvDaily = { date: string; metric: string; min: number; avg: number; max: number; count: number };
+export type SiteEnvDaily = {
+  site_id: string; days: number; since: string;
+  tank: EnvDaily[] | null; site: EnvDaily[] | null;
+  tide: { kind: 'tide_high' | 'tide_low'; at: string; level_cm: number }[];
+  sources: Partial<Record<'buoy' | 'daily_water', { station_id: string; station_name: string; distance_km: number | null; source: string; observed_at: string }>>;
+  thresholds: { wind_speed: number; wave_height: number };
+};
+export const SiteEnv = {
+  daily: (days: number) => api<SiteEnvDaily>(`/v1/site-env/daily?days=${days}`),
+};
+
+export const WaterQuality = {
+  // 수조별 수질 버킷(집계) — 일단위 추이용. since=RFC3339 (예: 24h 전).
+  buckets: (tankId: string, sinceISO: string) =>
+    api<{ tank_id: string; items: WQBucket[]; count: number }>(
+      `/v1/water-quality/buckets?tank_id=${encodeURIComponent(tankId)}&since=${encodeURIComponent(sinceISO)}&limit=2000`,
+    ),
+};
+
+export type ChillerEnergyPoint = { ts: string; power_kw: number | null; current_a: number | null };
+
+export const Chiller = {
+  // 냉각기 24h 전력 평가 — 전류/kW 시계열 + 누적 kWh.
+  energy: (sinceISO: string, deviceId = 'chiller_1') =>
+    api<{
+      device_id: string;
+      items: ChillerEnergyPoint[];
+      latest_kw: number | null;
+      day_kwh: number;
+      month_kwh: number;
+      total_kwh: number;
+      count: number;
+    }>(`/v1/chiller/energy?device_id=${encodeURIComponent(deviceId)}&since=${encodeURIComponent(sinceISO)}`),
+  // 운영자 수동 ON/OFF (AI 자동제어와 별개). ⚠ 실제 장비 작동.
+  control: (on: boolean) =>
+    api<{ ok: boolean; on: boolean; command_id: string }>('/v1/chiller/control', {
+      method: 'POST',
+      body: JSON.stringify({ on }),
+    }),
+};
+
+export type TempRecommendation = {
+  tank_id: string;
+  current_temp_c: number;
+  current_do?: number;
+  recommended_setpoint_c: number;
+  action: string; // cool | hold | allow_rise
+  constraint_binding: string; // do | temp_max | none
+  rationale: string;
+  energy_note?: string;
+  mode: string; // shadow
+};
+
+export type TempParams = {
+  optimal_growth_c: number;
+  temp_min_c: number;
+  temp_max_c: number;
+  do_floor: number;
+  do_margin: number;
+  hysteresis_c: number;
+  max_ramp_c_per_hour: number;
+  cooling_lead_min?: number; // 냉각 정지 후 열관성 하강 시간(분) — 코스팅 예측 정지
+};
+
+// 자동 수온제어 워커의 마지막 판단 (대시보드 표시용).
+export type TempControlDecision = {
+  at: string;
+  temp_c: number;
+  have_rate: boolean;
+  rate_c_per_h: number;
+  target_c: number;
+  action: string; // cool | hold | allow_rise
+  desired_on: boolean;
+  actual_on: boolean;
+  have_power: boolean;
+  coasting: boolean; // 코스팅 예측으로 조기 정지
+  active: boolean; // 자동제어 활성(false=관찰)
+  reason: string;
+};
+
+export const Optimize = {
+  // 최적환경조성(수온) 권고 + 워커 마지막 판단(control).
+  temp: () =>
+    api<{ mode: string; items: TempRecommendation[]; count: number; control: TempControlDecision | null }>(
+      '/v1/optimize/temp',
+    ),
+  // 한계 수온 등 파라미터 조회/설정.
+  getParams: () => api<TempParams>('/v1/optimize/temp/params'),
+  setParams: (p: TempParams) =>
+    api<{ ok: boolean; params: TempParams }>('/v1/optimize/temp/params', {
+      method: 'PUT',
+      body: JSON.stringify(p),
+    }),
+  // 자동 수온제어 on(active)/off(shadow) 런타임 전환 (재시작 불필요).
+  setMode: (active: boolean) =>
+    api<{ ok: boolean; mode: string }>('/v1/optimize/temp/mode', {
+      method: 'POST',
+      body: JSON.stringify({ active }),
+    }),
 };
 
 export const Partners = {
@@ -445,6 +617,12 @@ export const Controllers = {
       `/v1/controllers/${encodeURIComponent(id)}/test`,
       { method: 'POST', body: JSON.stringify({}) },
     ),
+  // onoff 급이기 운전/정지 (feeder control). confirm=true 만 실작동.
+  feed: (id: string, action: 'run' | 'stop', confirm: boolean) =>
+    api<{ ok?: boolean; dry_run?: boolean; action: string; ext_id: number; controller_id: string }>(
+      `/v1/controllers/${encodeURIComponent(id)}/feed`,
+      { method: 'POST', body: JSON.stringify({ action, confirm }) },
+    ),
   delete: (id: string) =>
     api<{ ok: boolean; deleted: string }>(
       `/v1/controllers/${encodeURIComponent(id)}`,
@@ -595,6 +773,12 @@ export const FeedCycles = {
       `/v1/feed-cycles/${encodeURIComponent(cycleId)}/stop`,
       { method: 'POST', body: '{}' },
     ),
+  // 사이클 완료 자동 보고 (feed.cycle.report) 최근 목록 — 그룹 개요 "급이 보고" 카드.
+  reports: (limit = 20, tankId?: string) =>
+    api<{ items: FeedCycleReport[] }>(
+      `/v1/feed-cycles/reports?limit=${limit}` +
+        (tankId ? `&tank_id=${encodeURIComponent(tankId)}` : ''),
+    ),
 };
 
 // ── Environmental safety (C-3w) ───────────────────────────────────────────────
@@ -634,10 +818,11 @@ export const Environmental = {
 
 export const OperatorIntents = {
   create: (body: NewIntentBody) =>
+    // LLM 종합판단(gemma)이 동기로 도는 호출 — 기본 20s 타임아웃으로는 부족. 백엔드 150s 에 맞춰 넉넉히.
     api<{ intent_id: string; llm_analysis?: LLMAnalysis }>('/v1/operator/intents', {
       method: 'POST',
       body: JSON.stringify(body),
-    }),
+    }, 180_000),
   list: (tankId?: string, limit = 50) => {
     const params = new URLSearchParams();
     if (tankId) params.set('tank_id', tankId);
@@ -839,6 +1024,17 @@ export const Inventory = {
       '/v1/inventory/consume',
       { method: 'POST', body: JSON.stringify(body) },
     ),
+  // 사료 영양성분표 등록/수정.
+  setComposition: (itemId: string, body: FeedComposition) =>
+    api<{ ok: boolean; item: InventoryItem }>(
+      `/v1/inventory/items/${encodeURIComponent(itemId)}/composition`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  // 구매(입고) 이력 목록 (최신순).
+  listPurchases: (category?: string, limit = 50) =>
+    api<{ items: PurchaseHistoryItem[]; count: number }>(
+      `/v1/inventory/purchases?limit=${limit}` + (category ? `&category=${encodeURIComponent(category)}` : ''),
+    ),
   uploadPurchaseDoc: async (purchaseId: string, form: FormData): Promise<PurchaseDocUploadResponse> => {
     const res = await fetch(
       BASE + `/v1/inventory/purchases/${encodeURIComponent(purchaseId)}/documents`,
@@ -928,9 +1124,26 @@ export const Vision = {
     return api<VisionObservationsResponse>(`/v1/vision/observations${qs}`);
   },
   algorithms: () => api<VisionAlgorithmsResponse>('/v1/vision/algorithms'),
+  // since / metaOnly — 화면이 보는 기간만 받는다 (2026-08-14). 종전에는 기간과 무관하게
+  // 항상 23일치(1.5MB · series 25만 표본)를 30초마다 받아 렌더러가 죽었다.
+  agitationRecent: (limit = 500, opts?: { since?: string; metaOnly?: boolean }) => {
+    const p = new URLSearchParams({ limit: String(limit) });
+    if (opts?.since) p.set('since', opts.since);
+    if (opts?.metaOnly) p.set('meta_only', '1');
+    return api<VisionAgitationRecentResponse>(`/v1/vision/agitation/recent?${p}`);
+  },
+  agitationBaseline: (limit = 3000) =>
+    api<VisionAgitationBaselineResponse>(`/v1/vision/agitation/baseline?limit=${limit}`),
+  agitationLive: () =>
+    api<VisionAgitationLiveResponse>('/v1/vision/agitation/live'),
+  modelScoresRecent: (limit = 200) =>
+    api<VisionModelScoresResponse>(`/v1/vision/model-scores/recent?limit=${limit}`),
   tankApplications: () =>
     api<VisionTankApplicationsResponse>('/v1/vision/tank-applications'),
-  trainingStatus: () => api<VisionTrainingStatus>('/v1/vision/training/status'),
+  trainingStatus: (algorithmId?: string) =>
+    api<VisionTrainingStatus>(
+      `/v1/vision/training/status${algorithmId ? `?algorithm_id=${encodeURIComponent(algorithmId)}` : ''}`,
+    ),
   trainingJobs: () => api<VisionTrainingJobsResponse>('/v1/vision/training/jobs'),
   bootstrapLabels: () =>
     api<VisionBootstrapLabelsResponse>('/v1/vision/bootstrap/labels'),
@@ -952,6 +1165,11 @@ export const Vision = {
       { method: 'POST', body: JSON.stringify(body) },
     ),
   // G-4 cycle 종료 dispute. cycle 완료 직후 자동 modal 에서 호출.
+  // GET disputes — 사이클 평가 모달(실시간)의 운영자 점수 조회 (② 탭 프리필용)
+  observationDisputes: (observationId: string, limit = 5) =>
+    api<{ items: { recorded_at: string; payload: { operator_score?: number; operator_discharge?: string; disputed_at: string } }[] }>(
+      `/v1/vision/observations/${encodeURIComponent(observationId)}/disputes?limit=${limit}`,
+    ),
   dispute: (
     observationId: string,
     body: VisionObservationDisputeBody,
@@ -985,8 +1203,69 @@ export const Vision = {
     api<VisionTrainingPoolResponse>(
       `/v1/vision/training-pool?phase=${phase}&limit=${limit}`,
     ),
+  // 클립의 요동곡선 요약 + 제안 점수(먹이반응 prior). 참고용 — 최종 라벨은 운영자 확정.
+  agitation: (clipID: string) =>
+    api<VisionAgitationResponse>(
+      `/v1/vision/agitation?clip_id=${encodeURIComponent(clipID)}`,
+    ),
+  // docs/50 — 펄스 세그먼트 채점(통클립 1점 dispute 대신). cycle_id 기준 세그먼트 + 제안값 조회.
+  segments: (cycleId: string) =>
+    api<VisionSegmentsResponse>(
+      `/v1/vision/segments?cycle_id=${encodeURIComponent(cycleId)}`,
+    ),
+  // 펄스 세그먼트 라벨 저장 — 카메라(클립)당 1회 호출.
+  saveSegmentLabels: (body: VisionSegmentLabelSaveBody) =>
+    api<VisionSegmentLabelSaveResponse>('/v1/vision/segment-labels', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  // ③ 바닥 스틸 목록 — 라벨은 saveBootstrapLabel(origin_still_id)로 저장 (박스 통일, 2026-07-08)
+  floorStills: (opts?: { unlabeled?: boolean; tankId?: string; limit?: number }) =>
+    api<FloorStillsResponse>(
+      `/v1/vision/floor-stills?limit=${opts?.limit ?? 100}` +
+        (opts?.unlabeled ? '&unlabeled=1' : '') +
+        (opts?.tankId ? `&tank_id=${encodeURIComponent(opts.tankId)}` : ''),
+    ),
   // R15/R16 — captures 디스크 사용량 + retention 정책 상태
   captureDisk: () => api<CaptureDiskResponse>('/v1/capture/disk'),
+  // 상시 캡처(학습 데이터 수집) 런타임 제어
+  captureStatus: () => api<CaptureStatusResponse>('/v1/capture/status'),
+  captureStart: () => api<{ ok: boolean; running: boolean }>('/v1/capture/start', { method: 'POST' }),
+  captureStop: () => api<{ ok: boolean; running: boolean }>('/v1/capture/stop', { method: 'POST' }),
+};
+
+// 바닥 스틸 이미지 URL — <img> 는 Authorization 헤더를 못 보내므로 MJPEG 와 동일하게
+// 동일출처/프록시 인증 경로를 탄다.
+export function floorStillImageURL(stillID: string): string {
+  return `${BASE}/v1/vision/floor-stills/image?still_id=${encodeURIComponent(stillID)}`;
+}
+
+export type FloorStillItem = {
+  still_id: string;
+  tank_id: string;
+  camera_id: string;
+  trigger: string; // pre_cycle | post_cycle | periodic
+  cycle_id: string;
+  captured_at: string;
+  box_labeled: boolean; // bootstrap 박스 라벨(origin_still_id) 완료 여부
+};
+
+export type FloorStillsResponse = {
+  items: FloorStillItem[];
+  count: number;
+  total_stills: number;
+  total_labeled: number;
+};
+
+export type CaptureStatusResponse = {
+  available: boolean;
+  running: boolean;
+  enabled: boolean;
+  mode: string; // fixture | rtsp
+  tanks: string[] | null;
+  duration_seconds: number;
+  spacing_seconds: number;
+  temp_dir: string;
 };
 // ───── Hatchery 종묘장 (broodstock·spawn·larval·live-feed·treatment) ─────
 export const Broodstock = {

@@ -18,11 +18,13 @@ const ManifestPath = "local-ai/models/active/manifest.json"
 // AlgorithmActiveState is the per-algorithm record of what's promoted now,
 // plus a small history that supports rollback.
 type AlgorithmActiveState struct {
-	ActiveWeightsPath string         `json:"active_weights_path"`
-	ActiveJobID       string         `json:"active_job_id,omitempty"`
-	AppliedAt         string         `json:"applied_at,omitempty"`
-	OperatorID        string         `json:"operator_id,omitempty"`
-	History           []HistoryEntry `json:"history,omitempty"`
+	ActiveWeightsPath string `json:"active_weights_path"`
+	ActiveJobID       string `json:"active_job_id,omitempty"`
+	AppliedAt         string `json:"applied_at,omitempty"`
+	OperatorID        string `json:"operator_id,omitempty"`
+	// Note — 이 가중치의 평가 요약 (예: 3자 비교 수치). 롤백 판단 근거로 UI 노출.
+	Note    string         `json:"note,omitempty"`
+	History []HistoryEntry `json:"history,omitempty"`
 }
 
 type HistoryEntry struct {
@@ -31,6 +33,7 @@ type HistoryEntry struct {
 	AppliedAt   string `json:"applied_at,omitempty"`
 	RemovedAt   string `json:"removed_at,omitempty"`
 	OperatorID  string `json:"operator_id,omitempty"`
+	Note        string `json:"note,omitempty"` // 평가 요약 — 롤백 비교용
 }
 
 // Manifest is the on-disk JSON shape.
@@ -112,7 +115,7 @@ func saveManifestLocked(m *Manifest) error {
 
 // Promote sets a new active weights path for the algorithm and pushes the
 // previous one (if any) into history. Validates the candidate file exists.
-func Promote(algorithmID, candidatePath, jobID, operatorID string) (*AlgorithmActiveState, error) {
+func Promote(algorithmID, candidatePath, jobID, operatorID, note string) (*AlgorithmActiveState, error) {
 	if algorithmID == "" {
 		return nil, errors.New("algorithm_id is required")
 	}
@@ -137,12 +140,14 @@ func Promote(algorithmID, candidatePath, jobID, operatorID string) (*AlgorithmAc
 			AppliedAt:   cur.AppliedAt,
 			RemovedAt:   now,
 			OperatorID:  cur.OperatorID,
+			Note:        cur.Note,
 		})
 	}
 	cur.ActiveWeightsPath = candidatePath
 	cur.ActiveJobID = jobID
 	cur.AppliedAt = now
 	cur.OperatorID = operatorID
+	cur.Note = note
 	m.Algorithms[algorithmID] = cur
 	if err := saveManifestLocked(m); err != nil {
 		return nil, err
@@ -175,6 +180,7 @@ func Rollback(algorithmID, operatorID string) (*AlgorithmActiveState, error) {
 	cur.ActiveJobID = prev.JobID
 	cur.AppliedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	cur.OperatorID = operatorID
+	cur.Note = prev.Note
 	m.Algorithms[algorithmID] = cur
 	if err := saveManifestLocked(m); err != nil {
 		return nil, err

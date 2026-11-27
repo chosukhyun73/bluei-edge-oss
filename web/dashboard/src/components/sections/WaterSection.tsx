@@ -1,7 +1,7 @@
 import type { StateVector } from '../../lib/types';
 import { relativeTime, qualityColor } from '../../lib/format';
 import { Badge } from '../ui/badge';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 type Props = { data?: StateVector['water'] };
 

@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { X, AlertTriangle } from 'lucide-react';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // C-8 — 단순 fixed-overlay 확인 다이얼로그.
 // shadcn/ui dialog 를 추가하면 라이브러리 의존성이 늘어 본선 D-10 동선에서 위험.

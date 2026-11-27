@@ -42,7 +42,15 @@ function Root() {
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root element not found');
 
-createRoot(rootEl).render(
+// HMR invalidate 계단식(Fast Refresh 비호환 export → main.tsx 재실행)에서 React root 가
+// 중복 생성되면 앱이 2벌 마운트돼 모달·폴링이 이중화된다 (2026-07-19 이중 제출 실측).
+// 재실행 시 기존 root 를 재사용해 단일 인스턴스를 보장한다.
+type RootHolder = { __blueiAppRoot?: ReturnType<typeof createRoot> };
+const holder = globalThis as unknown as RootHolder;
+const appRoot = holder.__blueiAppRoot ?? createRoot(rootEl);
+holder.__blueiAppRoot = appRoot;
+
+appRoot.render(
   <LanguageProvider>
     <Root />
   </LanguageProvider>,

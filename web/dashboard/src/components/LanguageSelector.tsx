@@ -1,6 +1,6 @@
 // 언어 전환 드롭다운. useLanguage 로 현재 언어를 읽고 setLang 으로 전환(localStorage 영속).
 import { LANGUAGE_LABELS, SUPPORTED_LANGUAGES, type AppLanguage } from '../lib/i18n';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 export function LanguageSelector() {
   const { lang, setLang, tr } = useLanguage();

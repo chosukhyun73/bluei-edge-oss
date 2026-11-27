@@ -1,0 +1,13 @@
+id: asc_coc
+name: ASC CoC
+version: MSC CoC v5.1 + ASC CoC Module v1.3
+checked_at: "2026-11-17"
+min_retention_years: 3
+items:
+  - {id: cert, title: 유효한 ASC CoC 인증서를 등록했다, required: true, check: "cert_own:asc_coc"}
+  - {id: food_safety, title: GFSI 인정 제도 또는 ISO 22000 인증서를 등록했다, required: true, check: "cert_own:food_safety", note: 한국 HACCP 은 인정되지 않는다. 소규모 면제(연매출 200만 유로 미만 등) 해당 여부는 심사기관에 확인}
+  - {id: retention, title: 기록을 3년 이상 보관한다, required: true, check: retention}
+  - {id: fraud, title: 식품사기 취약성 평가, clause: "5.8.1", required: true, check: manual}
+  - {id: volume, title: ASC 지정 형식의 물량 제출, clause: "4.4.2", required: true, check: later}
+  - {id: non_certified, title: 비인증 전환분 기록, clause: "4.4.3", required: true, check: later}
+  - {id: segregation, title: 인증품 식별·분리·수율 기록, required: true, check: later}

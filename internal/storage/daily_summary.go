@@ -7,15 +7,28 @@ import (
 	"time"
 )
 
-// AggregateSensorReadingsDailyBefore groups raw sensor.reading.recorded events
-// (recorded_at < before) by local calendar day + sensor_id + metric, returning
-// min/max/avg/count. The local day is recorded_at shifted by tzOffsetSeconds.
-// Only complete days appear because `before` is a day boundary chosen by the caller.
+// AggregateSensorReadingsDailyBefore groups raw sensor.reading.recorded events by
+// local calendar day + sensor_id + metric, returning min/max/avg/count, for every
+// day that has a reading with recorded_at < before (the rows retention will prune).
+// The day is payload.observed_at (fallback recorded_at) shifted by tzOffsetSeconds.
 func (s *sqliteStore) AggregateSensorReadingsDailyBefore(ctx context.Context, before time.Time, tzOffsetSeconds int) ([]SensorDailyAgg, error) {
-	// SQLite date() with a '+N seconds' modifier shifts UTC recorded_at into local time.
+	// SQLite date() with a '+N seconds' modifier shifts UTC timestamps into local time.
+	// 날짜는 측정 시각(payload.observed_at) 기준, 없으면 recorded_at (2026-11-18).
+	// 서버에서 받아 온 과거 기록은 recorded_at 이 받은 날이라, recorded_at 으로 묶으면
+	// 1년 뒤 몇 년치가 "받은 날" 하루로 뭉친다.
+	// 대상 = 이번에 지워질 raw(recorded_at < before)가 하나라도 있는 측정일. 그날 값은
+	// recorded_at 과 무관하게 전부 넣는다 — 한 측정일이 이틀에 걸쳐 들어와도 요약이 온전하다
+	// (요약 ID 가 날짜+센서+메트릭이라 처음 만든 요약이 그대로 남기 때문).
 	shift := fmt.Sprintf("%+d seconds", tzOffsetSeconds)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT date(recorded_at, ?)                                AS d,
+		WITH r AS (
+		  SELECT date(COALESCE(json_extract(payload_json,'$.observed_at'), recorded_at), ?) AS d,
+		         recorded_at, payload_json
+		  FROM events
+		  WHERE event_type='sensor.reading.recorded'
+		    AND json_extract(payload_json,'$.value') IS NOT NULL
+		)
+		SELECT d,
 		       json_extract(payload_json,'$.sensor_id')           AS sensor_id,
 		       COALESCE(json_extract(payload_json,'$.device_id'),'') AS device_id,
 		       json_extract(payload_json,'$.metric')              AS metric,
@@ -24,10 +37,8 @@ func (s *sqliteStore) AggregateSensorReadingsDailyBefore(ctx context.Context, be
 		       MIN(CAST(json_extract(payload_json,'$.value') AS REAL)) AS mn,
 		       MAX(CAST(json_extract(payload_json,'$.value') AS REAL)) AS mx,
 		       AVG(CAST(json_extract(payload_json,'$.value') AS REAL)) AS av
-		FROM events
-		WHERE event_type='sensor.reading.recorded'
-		  AND recorded_at < ?
-		  AND json_extract(payload_json,'$.value') IS NOT NULL
+		FROM r
+		WHERE d IN (SELECT d FROM r WHERE recorded_at < ?)
 		GROUP BY d, sensor_id, metric
 		ORDER BY d, sensor_id, metric`,
 		shift, before.UTC().Format(time.RFC3339Nano))

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Group, Tank, StateVector } from '../lib/types';
 import { Tanks } from '../lib/api';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 import { GroupHeader } from './GroupHeader';
 import { GroupOverview } from './GroupOverview';
 import { GroupTankComparison } from './GroupTankComparison';
@@ -76,11 +76,40 @@ export function GroupDashboard({ group, tanks, onSelectTank, onTanksChanged }: P
     0,
   );
 
+  // 추정 체중 — avg_weight_g 는 마지막 실측(앵커)이라 샘플링을 안 하면 안 변한다.
+  // 급이량 기반 추정치를 함께 보여준다 (2026-09-07 운영자 결정).
+  // 추정치가 없는 수조는 앵커로 대체해 합계가 어긋나지 않게 한다.
+  const weightOf = (t: (typeof tanks)[number]) =>
+    t.estimated_avg_weight_g ?? t.avg_weight_g ?? 0;
+  const estAvgWeight =
+    totalFish > 0
+      ? tanks.reduce((sum, t) => sum + (t.fish_count ?? 0) * weightOf(t), 0) / totalFish
+      : 0;
+  const estTotalBiomassKg = tanks.reduce(
+    (sum, t) => sum + ((t.fish_count ?? 0) * weightOf(t)) / 1000,
+    0,
+  );
+  // 앵커 경과일은 수조마다 다를 수 있어 가장 오래된 쪽을 대표로 쓴다(보수적).
+  const daysSinceAnchor = tanks.reduce(
+    (max, t) => Math.max(max, t.weight_days_since_anchor ?? 0),
+    0,
+  );
+  const hasEstimate = tanks.some(t => t.estimated_avg_weight_g != null);
+
   return (
     <div className="space-y-5">
       <GroupHeader
         group={group}
-        stats={{ totalTanks, totalFish, avgWeight, totalBiomassKg }}
+        stats={{
+          totalTanks,
+          totalFish,
+          avgWeight,
+          totalBiomassKg,
+          estAvgWeight,
+          estTotalBiomassKg,
+          daysSinceAnchor,
+          hasEstimate,
+        }}
       />
 
       <Tabs

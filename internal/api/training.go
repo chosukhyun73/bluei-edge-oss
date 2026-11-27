@@ -1,10 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"sort"
 	"strings"
+	"time"
 
 	"bluei.kr/edge/internal/common"
 	"bluei.kr/edge/internal/config"
@@ -70,10 +74,21 @@ func (s *Server) handleTrainingStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
 		return
 	}
-	bootBoxes, bootFrames, err := s.countBootstrapLabels(r)
+	cameraPosition := detectorCameraPosition(algoID)
+	cov, err := s.countBootstrapLabels(r, cameraPosition)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
 		return
+	}
+	bootBoxes, bootFrames := cov.Boxes, cov.Frames
+
+	// 재학습 권장 프레임 수 — promote 병목 실측(7-16) 기준 운영자 목표 150~200장.
+	// 진행바의 "절대 최소"(bootstrap_min_frames)와 별개의 promote 준비도 목표.
+	recommendedFrames := 150
+	if algo != nil {
+		if v, ok := numFromMap(algo.Validation, "recommended_frames"); ok && v > 0 {
+			recommendedFrames = int(v)
+		}
 	}
 
 	var current map[string]any
@@ -112,6 +127,15 @@ func (s *Server) handleTrainingStatus(w http.ResponseWriter, r *http.Request) {
 			"can_validate": disputeReady,
 			"hint":         "맞아요/틀려요 라벨은 행동 점수 정확도 검증에 사용되며, 검출기 학습에는 직접 쓰이지 않습니다.",
 		},
+		"coverage": map[string]any{
+			"camera_position":         cameraPosition,
+			"classes":                 cov.Classes,
+			"time_of_day":             cov.TimeOfDay,
+			"recommended_frames":      recommendedFrames,
+			"target_frames_per_class": 50, // 7-08/7-09 운영자 목표 (pellet·feces 각 50+)
+			"last_run":                s.latestCompletedJobResult(r.Context(), algoID),
+		},
+		"segments":           s.segmentGateSummary(r.Context()),
 		"can_start_training": bootstrapReady, // 검출기 학습 게이트가 우선
 		"current_job":        current,
 		"is_running":         s.train.IsRunning(),
@@ -121,28 +145,154 @@ func (s *Server) handleTrainingStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// countBootstrapLabels returns total box count and unique frame (label_id) count.
-func (s *Server) countBootstrapLabels(r *http.Request) (boxes, frames int, err error) {
+// yoloExportClasses — export_labels.py YOLO_CLASSES 와 동기 유지 (exclude 는
+// 마스크 마커라 학습 대상 아님).
+var yoloExportClasses = []string{"fish", "fish_abnormal", "food", "pellet", "feces"}
+
+// classCoverage — 클래스별 학습 데이터 커버리지. 프레임 다양성이 promote 병목
+// (7-16 mAP50 0.037 부결: pellet 89·feces 168 박스가 소수 이미지에 몰림)이라
+// 박스 수가 아니라 "서로 다른 프레임 수 + 집중도"를 정본 지표로 노출한다.
+type classCoverage struct {
+	Class     string  `json:"class"`
+	Boxes     int     `json:"boxes"`
+	Frames    int     `json:"frames"`
+	Top5Share float64 `json:"top5_box_share"` // 상위 5개 프레임에 몰린 박스 비율 (높음 = 같은 장면 복제)
+}
+
+type bootstrapCoverage struct {
+	Boxes     int
+	Frames    int
+	Classes   []classCoverage
+	TimeOfDay map[string]int // morning|day|evening|night (KST) — 라벨 시각 기준
+}
+
+var kst = time.FixedZone("KST", 9*3600)
+
+func timeOfDayBucket(t time.Time) string {
+	switch h := t.In(kst).Hour(); {
+	case h >= 5 && h < 11:
+		return "morning"
+	case h >= 11 && h < 17:
+		return "day"
+	case h >= 17 && h < 22:
+		return "evening"
+	default:
+		return "night"
+	}
+}
+
+// detectorCameraPosition — 알고리즘의 학습 대상 카메라 시점.
+// run_training.py 와 동일 규칙: algorithm_id 에 '_top' 포함이면 top, 아니면 underwater.
+func detectorCameraPosition(algoID string) string {
+	if strings.Contains(algoID, "_top") {
+		return "top"
+	}
+	return "underwater"
+}
+
+// countBootstrapLabels — export(export_labels.py bootstrap-yolo)와 동일 필터
+// (.jpg + 파일 실존 + 카메라 시점 + YOLO 클래스만)로 커버리지를 집계한다.
+// 종전 카운트는 파일 실존·시점을 안 봐서 export 가 실제 소비하는 수와 달랐다
+// (7-16: 화면 72 vs export 53).
+func (s *Server) countBootstrapLabels(r *http.Request, cameraPosition string) (*bootstrapCoverage, error) {
 	es, err := s.store.QueryEvents(r.Context(), storage.EventFilter{
 		EventType: events.EventVisionBootstrapLabelRecorded, Limit: 10000,
 	})
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
+	// camera_id → position (export 의 camera_profiles 조인과 동일. 프로필 없는
+	// 카메라는 export 도 시점 미상으로 제외한다.)
+	camPos := map[string]string{}
+	if profiles, err := s.store.ListCameraProfiles(r.Context(), ""); err == nil {
+		for _, cp := range profiles {
+			camPos[cp.CameraID] = cp.Position
+		}
+	}
+	yoloClass := map[string]bool{}
+	for _, c := range yoloExportClasses {
+		yoloClass[c] = true
+	}
+	cov := &bootstrapCoverage{TimeOfDay: map[string]int{}}
+	classBoxes := map[string]int{}
+	classFrameBoxes := map[string]map[string]int{} // class → label_id(프레임) → 박스 수
 	for _, e := range es {
 		var p events.VisionBootstrapLabelRecordedPayload
 		if err := json.Unmarshal([]byte(e.PayloadJSON), &p); err != nil {
 			continue
 		}
-		// 학습에 실제로 쓸 수 있으려면 스냅샷 jpg 가 있어야 함.
-		// snapshot_ref 가 .jpg 로 끝나는 경우만 카운트.
 		if !strings.HasSuffix(p.SnapshotRef, ".jpg") {
 			continue
 		}
-		frames++
-		boxes += len(p.Boxes)
+		if cameraPosition != "" && camPos[p.CameraID] != cameraPosition {
+			continue // 다른 시점 카메라 프레임 — 이 알고리즘 학습에 안 쓰임
+		}
+		if _, err := os.Stat(p.SnapshotRef); err != nil {
+			continue // 스냅샷 유실 — export 도 skipped_no_image 로 버리는 프레임
+		}
+		cov.Frames++
+		labeledAt := e.RecordedAt
+		if t, err := time.Parse(time.RFC3339, p.RecordedAt); err == nil {
+			labeledAt = t
+		}
+		cov.TimeOfDay[timeOfDayBucket(labeledAt)]++
+		for _, b := range p.Boxes {
+			if !yoloClass[b.Class] {
+				continue
+			}
+			cov.Boxes++
+			classBoxes[b.Class]++
+			if classFrameBoxes[b.Class] == nil {
+				classFrameBoxes[b.Class] = map[string]int{}
+			}
+			classFrameBoxes[b.Class][p.LabelID]++
+		}
 	}
-	return boxes, frames, nil
+	for _, c := range yoloExportClasses {
+		cc := classCoverage{Class: c, Boxes: classBoxes[c], Frames: len(classFrameBoxes[c])}
+		if cc.Boxes > 0 {
+			perFrame := make([]int, 0, len(classFrameBoxes[c]))
+			for _, n := range classFrameBoxes[c] {
+				perFrame = append(perFrame, n)
+			}
+			sort.Sort(sort.Reverse(sort.IntSlice(perFrame)))
+			top5 := 0
+			for i, n := range perFrame {
+				if i >= 5 {
+					break
+				}
+				top5 += n
+			}
+			cc.Top5Share = float64(top5) / float64(cc.Boxes)
+		}
+		cov.Classes = append(cov.Classes, cc)
+	}
+	return cov, nil
+}
+
+// latestCompletedJobResult — 최근 completed 학습 job 의 지표 (학습 준비도 카드의
+// "직전 학습 결과"). 없으면 nil. map50 은 run_training.py 가 방출한 경우에만 존재.
+func (s *Server) latestCompletedJobResult(ctx context.Context, algorithmID string) map[string]any {
+	es, err := s.store.QueryEvents(ctx, storage.EventFilter{
+		EventType: events.EventVisionTrainingJobUpdate, Limit: 200,
+	})
+	if err != nil {
+		return nil
+	}
+	for _, e := range es {
+		var p events.VisionTrainingJobUpdatePayload
+		if json.Unmarshal([]byte(e.PayloadJSON), &p) != nil {
+			continue
+		}
+		if p.AlgorithmID == algorithmID && p.Status == "completed" {
+			return map[string]any{
+				"job_id":       p.JobID,
+				"metrics":      p.Metrics,
+				"completed_at": p.UpdatedAt,
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleTrainingJobsRoute(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +438,33 @@ func (s *Server) handleTrainingJobCancel(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// latestCompletedTrainingJob — 이벤트 로그에서 해당 알고리즘의 가장 최근 completed
+// 학습 job 을 찾아 후보 weights 경로(job 디렉토리/best.pt)와 job_id 를 반환.
+// QueryEvents 는 sequence DESC 라 첫 일치가 최신.
+func (s *Server) latestCompletedTrainingJob(ctx context.Context, algorithmID string) (candidate, jobID string) {
+	es, err := s.store.QueryEvents(ctx, storage.EventFilter{
+		EventType: events.EventVisionTrainingJobUpdate, Limit: 200,
+	})
+	if err != nil {
+		return "", ""
+	}
+	for _, e := range es {
+		var p struct {
+			JobID         string `json:"job_id"`
+			AlgorithmID   string `json:"algorithm_id"`
+			Status        string `json:"status"`
+			CandidatePath string `json:"candidate_path"`
+		}
+		if json.Unmarshal([]byte(e.PayloadJSON), &p) != nil {
+			continue
+		}
+		if p.AlgorithmID == algorithmID && p.Status == "completed" && p.CandidatePath != "" {
+			return p.CandidatePath + "/best.pt", p.JobID
+		}
+	}
+	return "", ""
+}
+
 // handleVisionAlgorithmActionRoute serves /v1/vision/algorithms/{id}/{state|promote|rollback}.
 // state    (GET):  active weights + history (manifest read-through)
 // promote  (POST): copies candidate weights into the active manifest and records
@@ -319,7 +496,22 @@ func (s *Server) handleVisionAlgorithmActionRoute(w http.ResponseWriter, r *http
 			writeError(w, http.StatusInternalServerError, "MANIFEST_READ_FAILED", err.Error(), "")
 			return
 		}
-		writeJSON(w, http.StatusOK, st)
+		// 적용 대기 후보 — promote 와 동일 우선순위로 탐색. active 와 같으면 후보 없음
+		// (이미 적용됨). UI 는 이 값으로 [현장에 적용] 활성화를 결정한다.
+		candidate, candJob := "", ""
+		if job, ok := s.train.Current(); ok && job.AlgorithmID == algoID && job.Status == "completed" {
+			candidate, candJob = job.CandidatePath+"/best.pt", job.JobID
+		} else if c, j := s.latestCompletedTrainingJob(r.Context(), algoID); c != "" {
+			candidate, candJob = c, j
+		}
+		if candidate == st.ActiveWeightsPath {
+			candidate, candJob = "", ""
+		}
+		writeJSON(w, http.StatusOK, struct {
+			vision.AlgorithmActiveState
+			CandidatePath  string `json:"candidate_path,omitempty"`
+			CandidateJobID string `json:"candidate_job_id,omitempty"`
+		}{st, candidate, candJob})
 		return
 	}
 
@@ -339,6 +531,7 @@ func (s *Server) handleVisionAlgorithmActionRoute(w http.ResponseWriter, r *http
 		JobID               string `json:"job_id"`
 		CandidatePath       string `json:"candidate_path"`
 		OperatorID          string `json:"operator_id"`
+		Note                string `json:"note"` // 평가 요약 — manifest 에 기록, 롤백 비교용
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	if body.OperatorID == "" {
@@ -356,12 +549,22 @@ func (s *Server) handleVisionAlgorithmActionRoute(w http.ResponseWriter, r *http
 			if jobID == "" {
 				jobID = job.JobID
 			}
+		} else {
+			// Current 는 마지막 job 하나뿐 — 다른 알고리즘 학습이 뒤에 돌면 completed
+			// 후보가 가려진다 (2026-07-08 실측: YOLO 성공 후 LRCN 3건 → promote 실패).
+			// 이벤트 로그에서 이 알고리즘의 가장 최근 completed job 을 찾는다.
+			if c, j := s.latestCompletedTrainingJob(r.Context(), algoID); c != "" {
+				candidate = c
+				if jobID == "" {
+					jobID = j
+				}
+			}
 		}
 	}
 
 	var manifestState *vision.AlgorithmActiveState
 	if action == "promote" {
-		st, err := vision.Promote(algoID, candidate, jobID, body.OperatorID)
+		st, err := vision.Promote(algoID, candidate, jobID, body.OperatorID, body.Note)
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, "PROMOTE_FAILED",
 				"새 AI 적용 실패: "+err.Error(), "")

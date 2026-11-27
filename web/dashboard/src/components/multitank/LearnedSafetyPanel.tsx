@@ -11,7 +11,7 @@ import type { Dispute, LearnedRule } from '../../lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Skeleton } from '../ui/skeleton';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // C-3l: 학습 규칙 관리 + 운영자 dispute 누적 + mining 트리거 패널.
 // MultiTankOperations 의 5번째 sub-tab "안전학습" 안에 배치.

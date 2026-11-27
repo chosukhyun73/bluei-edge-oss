@@ -1,0 +1,177 @@
+# 신선 히스타민 어종(다랑어·고등어·방어 등) 표준 템플릿.
+# 관리 방식과 수치는 미국 FDA 「Fish and Fishery Products Hazards and Controls Guidance」
+# (2022-06판) 7장의 예시를 바탕으로 bluei 가 다시 정리한 것이다. 수치는 예시이며, 공장은
+# 자기 조건에 맞게 한계기준을 정하고 근거를 남긴 뒤 항목별로 확인해야 게시할 수 있다.
+# 온도는 화씨 기준을 섭씨로 옮긴 값이다(40°F = 4.4℃, 70°F = 21.1℃).
+id: fresh_histamine_fish
+name: 신선 히스타민 어종
+product_group: fresh_histamine_fish
+source: FDA Fish and Fishery Products Hazards and Controls Guidance (2022-06) 7장
+notice: 수치는 예시입니다. 자사 조건으로 설정하고 검증한 뒤 확인하십시오.
+content:
+  product:
+    name: ""
+    food_type: 신선 수산물(히스타민 생성 어종)
+    form: 냉장
+    storage: 냉장 보관·유통
+    intended_use: 가열 조리 또는 생식
+    consumers: 일반 소비자
+  team: []
+  steps:
+    - {step_id: receive, name: 원료 입고, method: 입고 검수(내부 온도 확인)}
+    - {step_id: chill_store, name: 원료 냉장 보관, method: 냉장고 보관}
+    - {step_id: cut, name: 손질, method: 로인·손질}
+    - {step_id: grade, name: 계량·등급, method: 중량 계량과 등급 구분}
+    - {step_id: pack, name: 포장·표시, method: 포장 후 표시}
+    - {step_id: finished_store, name: 완제품 냉장 보관, method: 냉장고 보관 후 출고}
+    - {step_id: pack_receive, name: 포장재 입고·보관, method: 포장재 입고 검수 후 보관}
+  links:
+    - {link_id: l01, from: receive, to: chill_store, flow_kind: product}
+    - {link_id: l02, from: chill_store, to: cut, flow_kind: product}
+    - {link_id: l03, from: cut, to: grade, flow_kind: product}
+    - {link_id: l04, from: grade, to: pack, flow_kind: product}
+    - {link_id: l05, from: pack, to: finished_store, flow_kind: product}
+    - {link_id: l06, from: pack_receive, to: pack, flow_kind: packaging}
+  hazards:
+    - hazard_id: hz_receive
+      step_id: receive
+      category: C
+      name: 히스타민 생성
+      cause: 어획 후 또는 운송 중 온도 관리 부족
+      severity: 3
+      likelihood: 2
+      significant: true
+      control_measure: 입고 시 내부 온도 확인
+      source_ref: FDA Hazards and Controls Guidance (2022-06) 7장
+    - hazard_id: hz_chill_store
+      step_id: chill_store
+      category: C
+      name: 히스타민 생성
+      cause: 보관 중 냉장 온도 이탈
+      severity: 3
+      likelihood: 2
+      significant: true
+      control_measure: 냉장고 온도 연속 기록
+      source_ref: FDA Hazards and Controls Guidance (2022-06) 7장
+    - hazard_id: hz_transfer_wait
+      link_id: l02
+      category: C
+      name: 히스타민 생성
+      cause: 냉장고에서 꺼낸 뒤 손질 전 대기
+      severity: 3
+      likelihood: 2
+      significant: true
+      control_measure: 이송 대기 시간 관리
+      source_ref: FDA Hazards and Controls Guidance (2022-06) 7장(누적 노출)
+    - hazard_id: hz_processing
+      step_id: cut
+      category: C
+      name: 히스타민 생성
+      cause: 가공 중 냉장 밖 누적 노출
+      severity: 3
+      likelihood: 2
+      significant: true
+      control_measure: 냉장 밖 누적 시간과 작업장 온도 관리
+      source_ref: FDA Hazards and Controls Guidance (2022-06) 7장
+    - hazard_id: hz_finished_store
+      step_id: finished_store
+      category: C
+      name: 히스타민 생성
+      cause: 완제품 보관 중 냉장 온도 이탈
+      severity: 3
+      likelihood: 2
+      significant: true
+      control_measure: 냉장고 온도 연속 기록
+      source_ref: FDA Hazards and Controls Guidance (2022-06) 7장
+  ccps:
+    - ccp_id: ccp_receive
+      code: CCP-1C
+      name: 원료 입고
+      scope_kind: step
+      step_ids: [receive]
+      hazard_ids: [hz_receive]
+      corrective_action: 기준을 넘은 lot 은 받지 않거나 따로 두고 히스타민 검사 후 처분한다. 공급자에게 알린다.
+      verification: 입고 기록 검토, 온도계 정확도 점검·교정, 히스타민 검사
+      limits:
+        - limit_id: lim_receive_core
+          item: core_temperature
+          rule_kind: instant
+          max: 4.4
+          unit: "℃"
+          source_kind: operator
+          automation_level: auto_observe
+          basis_ref: FDA 지침 7장 예시값(내부 온도 40°F 이하). 자사 검증 필요
+    - ccp_id: ccp_chill_store
+      code: CCP-2C
+      name: 원료 냉장 보관
+      scope_kind: step
+      step_ids: [chill_store]
+      hazard_ids: [hz_chill_store]
+      corrective_action: 온도를 바로잡고, 이탈 시간 동안 보관한 lot 을 따로 두어 누적 노출을 평가한 뒤 처분한다.
+      verification: 온도 기록 검토, 온도 센서 정확도 점검·교정
+      limits:
+        - limit_id: lim_chill_temp
+          item: temperature
+          rule_kind: instant
+          max: 4.4
+          unit: "℃"
+          source_kind: sensor
+          automation_level: auto_measure
+          basis_ref: FDA 지침 7장 예시값(냉장고 40°F 이하). 자사 검증 필요
+    - ccp_id: ccp_transfer_wait
+      code: CCP-3C
+      name: 보관 → 손질 이송 대기
+      scope_kind: link
+      link_ids: [l02]
+      hazard_ids: [hz_transfer_wait]
+      export_step_name: 이송·대기
+      corrective_action: 대기 한도를 넘긴 lot 은 냉장으로 되돌리고 누적 노출을 평가한 뒤 처분한다.
+      verification: 구역 출입 기록 검토
+      limits:
+        # 대기 시간 한도는 공장이 정한다. 값과 근거를 넣어야 게시할 수 있다.
+        - limit_id: lim_transfer_wait
+          item: wait_time
+          rule_kind: instant
+          unit: min
+          source_kind: derived
+          automation_level: auto_measure
+          basis_ref: ""
+    - ccp_id: ccp_processing
+      code: CCP-4C
+      name: 가공 구간 누적 노출
+      scope_kind: span
+      step_ids: [cut, grade, pack]
+      hazard_ids: [hz_processing]
+      export_step_name: 가공(손질~포장)
+      corrective_action: 누적 노출 한도를 넘긴 lot 은 따로 두고 히스타민 검사 후 처분한다. 원인을 찾아 재발을 막는다.
+      verification: 누적 노출 기록 검토, 작업장 온도 센서 정확도 점검·교정
+      limits:
+        - limit_id: lim_processing_exposure
+          item: exposure_time
+          rule_kind: cumulative_exposure
+          unit: min
+          params:
+            threshold: 4.4
+            max_minutes: 480
+            high_threshold: 21.1
+            max_minutes_high: 240
+          source_kind: derived
+          automation_level: auto_measure
+          basis_ref: FDA 지침 7장 예시값(40°F 초과 누적 8시간 이내, 70°F 초과가 있으면 4시간 이내 — 냉동·가열 이력이 없는 어류). 자사 검증 필요
+    - ccp_id: ccp_finished_store
+      code: CCP-5C
+      name: 완제품 냉장 보관
+      scope_kind: step
+      step_ids: [finished_store]
+      hazard_ids: [hz_finished_store]
+      corrective_action: 온도를 바로잡고, 이탈 시간 동안 보관한 lot 을 따로 두어 누적 노출을 평가한 뒤 처분한다.
+      verification: 온도 기록 검토, 온도 센서 정확도 점검·교정
+      limits:
+        - limit_id: lim_finished_temp
+          item: temperature
+          rule_kind: instant
+          max: 4.4
+          unit: "℃"
+          source_kind: sensor
+          automation_level: auto_measure
+          basis_ref: FDA 지침 7장 예시값(냉장고 40°F 이하). 자사 검증 필요

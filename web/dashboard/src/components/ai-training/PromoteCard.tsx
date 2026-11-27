@@ -3,7 +3,7 @@ import { Vision } from '../../lib/api';
 import type { VisionTrainingStatus, VisionAlgorithmApplyResponse } from '../../lib/types';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { ConfirmDialog } from '../ui/confirm-dialog';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 /**
  * 5/9 ai-training.js 의 promoteAlgorithm + rollbackAlgorithm.

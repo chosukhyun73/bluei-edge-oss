@@ -39,18 +39,47 @@ type BatchEnvelope struct {
 //
 // Unsupported edge events are dropped from the envelope but still marked
 // synced via batch ACK so they don't accumulate in the local queue.
-// Phase 2: backend Literal expansion is needed for mortality / stocking /
-// harvest / treatment / transfer / sampling / fcr / document / inventory /
-// ai_decision / autonomous_action / alerts.
+// 생산 기록(stocking/harvest/transfer/treatment/mortality/sampling)은 2단계에서 추가.
+// 남은 것: fcr / document / inventory / ai_decision / autonomous_action / alerts.
 var edgeToBackendEventType = map[string]string{
+	// 실시간 수질(수온/DO/pH/…) — 백엔드가 env_readings(long-format)로 투영한다.
+	// 2026-07-17 종단 검증(synccheck): 실 water_temperature POST → projected=1 확인.
+	"sensor.reading.recorded":      "sensor.reading.recorded",
 	"sensor.reading.daily_summary": "environment_snapshot",
 	"device.health.updated":        "device.health.updated",
-	"feeding.recorded":             "feeding_event",
+	// 취수구(연안) 수온 — NIFS 강릉 관측소 해수온. GX10 로컬에만 있던 external.env.recorded
+	// (payload {metric:sea_water_temperature, value, unit})를 백엔드 env_readings 로 흘려보내
+	// 앱이 "수조 수온"과 "취수구 수온"을 함께 표시할 수 있게 한다. tank_id 없음 → 백엔드
+	// group_fallback 으로 노드 대표 수조에 sea_water_temperature 지표로 투영.
+	"external.env.recorded": "sensor.reading.recorded",
+	// feeding_event 는 payload 필드 매핑(actual_total_amount_g→feed_amount_g 등)이 필요해
+	// feed.cycle.report 는 아직 미포함(Phase 1b). "feeding.recorded" 는 현재 미발생(레거시).
+	"feeding.recorded": "feeding_event",
+	// 생산 기록(docs/53 2단계) — 서버가 앱과 같은 helper 로 입식·분조·출하 lot·QR 까지 만든다.
+	// 마릿수는 /gx10/tanks 가 정본이라 서버는 마릿수를 바꾸지 않는다.
+	"tank.stocking.recorded":  "tank.stocking",
+	"tank.harvest.recorded":   "tank.harvest",
+	"tank.transfer.recorded":  "tank.transfer",
+	"tank.treatment.recorded": "tank.treatment",
+	"tank.mortality.recorded": "tank.mortality",
+	"tank.sampling.recorded":  "tank.sampling",
 }
 
 func mapEdgeEventTypeToBackend(edgeType string) (string, bool) {
 	v, ok := edgeToBackendEventType[edgeType]
 	return v, ok
+}
+
+// supportedEdgeEventTypes returns the edge event_types the backend can ingest.
+// createBatch queues only these so batches stay dense with projectable events;
+// unsupported high-volume types (media.clip/snapshot/feed.*) never enter the
+// sync queue and are handled by retention (or a separate pull path for clips).
+func supportedEdgeEventTypes() []string {
+	out := make([]string, 0, len(edgeToBackendEventType))
+	for k := range edgeToBackendEventType {
+		out = append(out, k)
+	}
+	return out
 }
 
 // transformEventForBackend converts an edge storage.Event into a
@@ -70,8 +99,17 @@ func transformEventForBackend(e *storage.Event) (map[string]any, bool) {
 		payload = map[string]any{}
 	}
 
+	// 앱에서 이어받은 입식은 앱에 이미 lot 이 있다 — 다시 올리지 않는다(배치 ACK 로 synced 처리).
+	if e.EventType == "tank.stocking.recorded" && payload["imported_from"] == "platform" {
+		return nil, false
+	}
+
 	var gx10TankID string
 	if v, ok := payload["tank_id"].(string); ok {
+		gx10TankID = v
+	}
+	// 분조·이동·판매는 tank_id 대신 출발 수조(from_tank_id)를 가진다.
+	if v, ok := payload["from_tank_id"].(string); ok && gx10TankID == "" {
 		gx10TankID = v
 	}
 
@@ -96,7 +134,7 @@ func transformEventForBackend(e *storage.Event) (map[string]any, bool) {
 
 // createBatch assembles unsynced, unbatched events into a new sync batch.
 func createBatch(ctx context.Context, app appInterface, store storage.Store, batchSize int) error {
-	unsynced, err := store.ListUnsyncedUnbatchedEvents(ctx, batchSize)
+	unsynced, err := store.ListUnsyncedUnbatchedEvents(ctx, supportedEdgeEventTypes(), batchSize)
 	if err != nil {
 		return err
 	}
@@ -225,6 +263,20 @@ func markBatchAcknowledged(ctx context.Context, app appInterface, store storage.
 	if err := store.UpdateSyncBatchStatus(ctx, batchID, "acknowledged", nil, &now, remoteAckID, ""); err != nil {
 		slog.Warn("failed to mark batch acknowledged", "batch_id", batchID, "error", err)
 		return
+	}
+	// ACK 된 이벤트를 synced 로 표시한다. 빠지면 같은 이벤트가 매 배치에 다시 뽑혀
+	// 새 이벤트가 전송되지 않는다(2026-07-19~ 선두 차단). 실패해도 재전송은 백엔드
+	// event_id 중복 무시로 무해하므로 경고만 남긴다.
+	if events, err := store.GetSyncBatchEvents(ctx, batchID); err != nil {
+		slog.Warn("failed to load acknowledged batch events", "batch_id", batchID, "error", err)
+	} else {
+		ids := make([]string, 0, len(events))
+		for _, e := range events {
+			ids = append(ids, e.EventID)
+		}
+		if err := store.MarkSynced(ctx, ids); err != nil {
+			slog.Warn("failed to mark acknowledged events synced", "batch_id", batchID, "error", err)
+		}
 	}
 	payload := map[string]any{
 		"batch_id":        batchID,

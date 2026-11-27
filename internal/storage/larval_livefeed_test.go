@@ -8,7 +8,7 @@ import (
 )
 
 func TestLarvalBatchCRUD(t *testing.T) {
-	store := openTestStore(t)
+	store := openHatcheryTestStore(t)
 	ctx := context.Background()
 
 	b := &storage.LarvalBatch{
@@ -42,7 +42,7 @@ func TestLarvalBatchCRUD(t *testing.T) {
 }
 
 func TestLiveFeedCultureCRUD(t *testing.T) {
-	store := openTestStore(t)
+	store := openHatcheryTestStore(t)
 	ctx := context.Background()
 
 	c := &storage.LiveFeedCulture{

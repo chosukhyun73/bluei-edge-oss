@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 import type {
   FeedCycle,
   FeedCycleMode,
@@ -9,26 +9,28 @@ import type {
   NewScheduleBody,
   OperatorIntent,
   LLMAnalysis,
+  Controller,
 } from '../../lib/types';
-import { FeedCycles, OperatorIntents, Tanks, Schedules, ApiError } from '../../lib/api';
+import { FeedCycles, OperatorIntents, Tanks, Schedules, Controllers, ApiError } from '../../lib/api';
+import { useLiveTemps } from '../../lib/use-live-temps';
+import {
+  controllerFeederCapability, feederControllerForTank, FEEDER_RATE_G_PER_SEC,
+  type FeederCapability,
+} from '../../lib/feeder-capability';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Skeleton } from '../ui/skeleton';
 import { DisputeModal } from './DisputeModal';
 import { LLMAnalysisModal } from './LLMAnalysisModal';
 import { SafetyGateBadges } from './SafetyGateBadges';
-import {
-  computeFeedingPolicy,
-  BSF_MODE_LABEL,
-  type BsfMode,
-  type FeedingPolicyComputation,
-} from '../../lib/species-policy';
+import { computeFeedingPolicy, BSF_MODE_LABEL, type BsfMode, type FeedingPolicyComputation, feedingWeightG } from '../../lib/species-policy';
 import {
   getEffectiveTankPolicy,
-  setTankOverride,
+  mergeTankOverride,
   type OperatingMode,
 } from '../../lib/feeding-policy-store';
-import { safetyGateMessage } from '../../lib/format';
+import { safetyGateMessage, dateLocale } from '../../lib/format';
+import { t } from '../../lib/i18n';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -196,7 +198,7 @@ function CycleDetail({
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div className="px-2 py-1.5 rounded-md bg-gray-700/40 border border-gray-700">
           <p className="text-gray-500 uppercase tracking-wide mb-0.5">{tr('cycleDetail.estimatedTimeBased')}</p>
-          <p className="font-mono text-gray-300">{cycle.total_amount_g.toFixed(2)} g</p>
+          <p className="font-mono text-gray-300">{cycle.total_amount_g.toFixed(1)} g</p>
         </div>
         <div
           className={
@@ -219,7 +221,7 @@ function CycleDetail({
               'font-mono ' + (hasActualWeight ? 'text-emerald-200' : 'text-gray-500')
             }
           >
-            {hasActualWeight ? `${cycle.actual_total_amount_g!.toFixed(2)} g` : tr('cycleDetail.waiting')}
+            {hasActualWeight ? `${cycle.actual_total_amount_g!.toFixed(1)} g` : tr('cycleDetail.waiting')}
           </p>
         </div>
       </div>
@@ -254,14 +256,14 @@ function CycleDetail({
         <div>
           <p className="text-gray-500 uppercase tracking-wide mb-0.5">{tr('cycleDetail.startedAt')}</p>
           <p className="font-mono text-gray-300">
-            {new Date(cycle.started_at).toLocaleString('ko-KR')}
+            {new Date(cycle.started_at).toLocaleString(dateLocale())}
           </p>
         </div>
         {cycle.completed_at && (
           <div>
             <p className="text-gray-500 uppercase tracking-wide mb-0.5">{tr('cycleDetail.completedAt')}</p>
             <p className="font-mono text-gray-300">
-              {new Date(cycle.completed_at).toLocaleString('ko-KR')}
+              {new Date(cycle.completed_at).toLocaleString(dateLocale())}
             </p>
           </div>
         )}
@@ -339,6 +341,18 @@ function NewCycleForm({
   // Phase B: ESP32 모터 출력 (살포 rpm 14~42 · 공급 amount 0~255). 빈 문자열 = 펌웨어 default.
   const [speedRpm, setSpeedRpm] = useState('');
   const [amount, setAmount] = useState('');
+  // 컨트롤러 능력 — onoff_feeder(on/off) 이면 rpm/amount 무의미(숨김). 선택 tank 의 급이기로 판정.
+  const [controllers, setControllers] = useState<Controller[]>([]);
+  useEffect(() => {
+    let alive = true;
+    Controllers.list('active')
+      .then(res => { if (alive) setControllers(res.items); })
+      .catch(() => { /* 미수신 → 기본 motor(기존 동작) */ });
+    return () => { alive = false; };
+  }, []);
+  const feederCtrl = feederControllerForTank(controllers, { tank_id: tankId });
+  const capability: FeederCapability = controllerFeederCapability(feederCtrl);
+  const isMotor = capability === 'motor';
   // 1일 목표 + 사이클 간격
   const [dailyTargetG, setDailyTargetG] = useState('');
   const [cycleIntervalMin, setCycleIntervalMin] = useState('');
@@ -352,6 +366,7 @@ function NewCycleForm({
   const [error, setError] = useState<string | null>(null);
   // F.2 — LLM 분석 modal
   const [llmModal, setLlmModal] = useState<{ intentId: string; analysis: LLMAnalysis | null } | null>(null);
+  const liveTemps = useLiveTemps();
 
   // fixedTankId 변경 시 동기화 (수동 섹션에서 상위 selectedTankId 와 일치)
   useEffect(() => {
@@ -365,11 +380,12 @@ function NewCycleForm({
     return computeFeedingPolicy({
       species: selectedTank.species,
       fish_count: selectedTank.fish_count ?? null,
-      avg_weight_g: selectedTank.avg_weight_g ?? null,
+      avg_weight_g: feedingWeightG(selectedTank),
       volume_m3: selectedTank.volume_m3 ?? null,
       bsf_mode: effective.bsf_mode,
-      temperature_c: null,
+      temperature_c: liveTemps[tankId] ?? null,
       max_daily_cycles: effective.max_daily_cycles,
+      daily_cycles: effective.daily_cycles,
     });
   })() : null;
 
@@ -484,8 +500,10 @@ function NewCycleForm({
       }
 
       // Phase B: ESP32 모터 출력 — 0 이면 펌웨어 default 사용 (미전송).
-      const speedRpmNum = speedRpm ? Number(speedRpm) : 0;
-      const amountNum = amount ? Number(amount) : 0;
+      // onoff_feeder(on/off) 급이기엔 rpm/amount 가 무의미하므로 아예 전송하지 않는다.
+      const speedRpmNum = isMotor && speedRpm ? Number(speedRpm) : 0;
+      const amountNum = isMotor && amount ? Number(amount) : 0;
+      const eff = getEffectiveTankPolicy(tankId, selectedTank?.group_id ?? '');
       await FeedCycles.start({
         tank_id: tankId,
         mode,
@@ -493,12 +511,18 @@ function NewCycleForm({
         params: mode === 'adaptive'
           ? {
               target_amount_g: Number(targetAmountG),
-              max_pulses: maxPulses ? Number(maxPulses) : undefined,
-              max_duration_min: maxDurationMin ? Number(maxDurationMin) : undefined,
-              pulse_duration_ms: pulseDurationMs ? Number(pulseDurationMs) : undefined,
-              gap_ms: gapMs ? Number(gapMs) : undefined,
-              ...(speedRpmNum > 0 ? { speed_rpm: speedRpmNum } : {}),
-              ...(amountNum > 0 ? { amount: amountNum } : {}),
+              // onoff_feeder(on/off): run/stop 초로 마이크로펄스 자동 도출(pulse/gap/max 백엔드 계산).
+              // ESP32(motor): 명시 펄스·모터 파라미터.
+              ...(!isMotor
+                ? { run_sec: eff.feeder_run_sec, stop_sec: eff.feeder_stop_sec }
+                : {
+                    max_pulses: maxPulses ? Number(maxPulses) : undefined,
+                    max_duration_min: maxDurationMin ? Number(maxDurationMin) : undefined,
+                    pulse_duration_ms: pulseDurationMs ? Number(pulseDurationMs) : undefined,
+                    gap_ms: gapMs ? Number(gapMs) : undefined,
+                    ...(speedRpmNum > 0 ? { speed_rpm: speedRpmNum } : {}),
+                    ...(amountNum > 0 ? { amount: amountNum } : {}),
+                  }),
             }
           : {
               pulse_duration_ms: Number(pulseDurationMs),
@@ -580,7 +604,7 @@ function NewCycleForm({
               </div>
               <div className="text-gray-400">
                 {tr('newCycle.dailyFeedAmount')} <span className="text-gray-200 font-mono">
-                  {policyComputation.daily_feed_g?.toLocaleString('ko-KR')}g
+                  {policyComputation.daily_feed_g?.toLocaleString(dateLocale())}g
                 </span>
                 {' '}÷ {tr('feedCycle.cyclesPerDay', { n: policyComputation.daily_cycles ?? '—' })} ={' '}
                 <span className="text-gray-200 font-mono">{policyComputation.cycle_target_amount_g}g/cycle</span>
@@ -603,11 +627,11 @@ function NewCycleForm({
               <label className="text-xs text-gray-400 font-medium block mb-1">{tr('newCycle.labelTodayConsumed')}</label>
               <div className="h-8 px-3 py-1.5 bg-gray-900 border border-gray-700 rounded text-sm font-mono">
                 <span className={willExceedDaily ? 'text-red-300' : 'text-gray-200'}>
-                  {todayConsumedG.toLocaleString('ko-KR')}
+                  {todayConsumedG.toLocaleString(dateLocale())}
                 </span>
                 {dailyTargetNum > 0 && (
                   <span className="text-gray-500 ml-1">
-                    / {dailyTargetNum.toLocaleString('ko-KR')}g ({((todayConsumedG / dailyTargetNum) * 100).toFixed(0)}%)
+                    / {dailyTargetNum.toLocaleString(dateLocale())}g ({((todayConsumedG / dailyTargetNum) * 100).toFixed(0)}%)
                   </span>
                 )}
               </div>
@@ -633,8 +657,8 @@ function NewCycleForm({
               <span className="text-amber-200">
                 <span className="font-semibold">{tr('newCycle.dailyExceedWarning')}</span>{' '}
                 {tr('newCycle.dailyExceedHint')} {tr('feedCycle.dailyExceedDetail', {
-                  projected: projectedDailyAfter.toLocaleString('ko-KR'),
-                  target: dailyTargetNum.toLocaleString('ko-KR'),
+                  projected: projectedDailyAfter.toLocaleString(dateLocale()),
+                  target: dailyTargetNum.toLocaleString(dateLocale()),
                 })}
                 {tr('newCycle.dailyExceedNote')}
               </span>
@@ -774,23 +798,29 @@ function NewCycleForm({
                   placeholder="75000"
                 />
               </div>
-              {/* Phase B: ESP32 살포(DAC1) / 공급(DAC2) 모터 출력 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <NumberField
-                  id="fc-speedrpm-adaptive"
-                  label={tr('newCycle.labelSpeedRpm')}
-                  value={speedRpm}
-                  onChange={setSpeedRpm}
-                  placeholder="32"
-                />
-                <NumberField
-                  id="fc-amount-adaptive"
-                  label={tr('newCycle.labelAmount')}
-                  value={amount}
-                  onChange={setAmount}
-                  placeholder="180"
-                />
-              </div>
+              {/* ESP32 살포(DAC1)/공급(DAC2) 모터 출력 — onoff_feeder(on/off) 급이기엔 미표시 */}
+              {isMotor ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <NumberField
+                    id="fc-speedrpm-adaptive"
+                    label={tr('newCycle.labelSpeedRpm')}
+                    value={speedRpm}
+                    onChange={setSpeedRpm}
+                    placeholder="32"
+                  />
+                  <NumberField
+                    id="fc-amount-adaptive"
+                    label={tr('newCycle.labelAmount')}
+                    value={amount}
+                    onChange={setAmount}
+                    placeholder="180"
+                  />
+                </div>
+              ) : (
+                <p className="text-[11px] text-cyan-300/80 bg-cyan-500/5 border border-cyan-500/20 rounded px-2 py-1.5">
+                  {tr('newCycle.onoffFeederNote', { rate: FEEDER_RATE_G_PER_SEC })}
+                </p>
+              )}
             </>
           ) : (
             <>
@@ -820,23 +850,29 @@ function NewCycleForm({
                   placeholder="6"
                 />
               </div>
-              {/* Phase B: ESP32 살포(DAC1) / 공급(DAC2) 모터 출력 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <NumberField
-                  id="fc-speedrpm-fixed"
-                  label={tr('newCycle.labelSpeedRpm')}
-                  value={speedRpm}
-                  onChange={setSpeedRpm}
-                  placeholder="32"
-                />
-                <NumberField
-                  id="fc-amount-fixed"
-                  label={tr('newCycle.labelAmount')}
-                  value={amount}
-                  onChange={setAmount}
-                  placeholder="180"
-                />
-              </div>
+              {/* ESP32 살포(DAC1)/공급(DAC2) 모터 출력 — onoff_feeder(on/off) 급이기엔 미표시 */}
+              {isMotor ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <NumberField
+                    id="fc-speedrpm-fixed"
+                    label={tr('newCycle.labelSpeedRpm')}
+                    value={speedRpm}
+                    onChange={setSpeedRpm}
+                    placeholder="32"
+                  />
+                  <NumberField
+                    id="fc-amount-fixed"
+                    label={tr('newCycle.labelAmount')}
+                    value={amount}
+                    onChange={setAmount}
+                    placeholder="180"
+                  />
+                </div>
+              ) : (
+                <p className="text-[11px] text-cyan-300/80 bg-cyan-500/5 border border-cyan-500/20 rounded px-2 py-1.5">
+                  {tr('newCycle.onoffFeederNote', { rate: FEEDER_RATE_G_PER_SEC })}
+                </p>
+              )}
             </>
           )}
 
@@ -1006,6 +1042,9 @@ function AutoModePanel({
 
   // Phase 1d: backend AI-managed schedule. polling 으로 5 분마다 재동기.
   const [aiSchedule, setAiSchedule] = useState<FeedingSchedule | null>(null);
+  // fetch 성공 여부 — 성공했는데 스케줄이 없으면(AI 정지/재생성 대기) fallback 시각을
+  // 표시하지 않는다 (발화하지 않을 시각이 "예정"처럼 보이는 오해 방지, 2026-07-05).
+  const [scheduleFetched, setScheduleFetched] = useState(false);
 
   useEffect(() => {
     if (!tank) { setAdjustHistory([]); return; }
@@ -1024,9 +1063,10 @@ function AutoModePanel({
 
   // Backend AI-managed schedule fetch (Phase 1d). 60 초마다 polling.
   useEffect(() => {
-    if (!tank) { setAiSchedule(null); return; }
+    if (!tank) { setAiSchedule(null); setScheduleFetched(false); return; }
     let cancelled = false;
     const tankId = tank.tank_id;
+    setScheduleFetched(false); // 수조 변경 시 리셋 — 이전 수조의 판정 잔존 방지
     const fetchSchedule = () => {
       Schedules.list()
         .then(r => {
@@ -1039,6 +1079,7 @@ function AutoModePanel({
               (s.tank_ids ?? []).includes(tankId),
           );
           setAiSchedule(match ?? null);
+          setScheduleFetched(true); // 성공 응답 기준 — 네트워크 오류는 fallback 유지
         })
         .catch(() => { if (!cancelled) setAiSchedule(null); });
     };
@@ -1073,15 +1114,23 @@ function AutoModePanel({
       }
       return { times: sorted, nextEta: eta, scheduleSource: 'backend' as const };
     }
+    // fetch 성공 + 스케줄 없음 = AI 정지(수동) 또는 재생성 대기 — 예정 시각 없음을 명시.
+    if (scheduleFetched) {
+      return { times: [] as string[], nextEta: null, scheduleSource: 'none' as const };
+    }
     return { times: fallback.times, nextEta: fallback.nextEta, scheduleSource: 'fallback' as const };
   })();
 
-  // 오늘 진행된 cycle 수.
+  // 오늘 진행된 cycle 수 — AI 계획(스케줄) 사이클만 진행률로 집계. 수동/테스트는 별도 표기.
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayCycles = recentCycles.filter(
     c => new Date(c.started_at).getTime() >= todayStart.getTime(),
   );
+  const todayAiCycles = todayCycles.filter(
+    c => c.priority === 'ai_advisory' || c.priority === 'ai_autonomous',
+  );
+  const todayManualCount = todayCycles.length - todayAiCycles.length;
 
   const lastReasonText = lastCompleted
     ? lastCompleted.termination_reason
@@ -1137,7 +1186,7 @@ function AutoModePanel({
                 </p>
                 <p className="text-sm text-green-200 font-mono">
                   {nextEta
-                    ? nextEta.toLocaleString('ko-KR', {
+                    ? nextEta.toLocaleString(dateLocale(), {
                         month: '2-digit',
                         day: '2-digit',
                         hour: '2-digit',
@@ -1156,7 +1205,12 @@ function AutoModePanel({
                   {tr('autoMode.todayProgress')}
                 </p>
                 <p className="text-sm text-gray-200 font-mono">
-                  {todayCycles.length} / {computation.daily_cycles ?? '?'} cycle
+                  {todayAiCycles.length} / {computation.daily_cycles ?? '?'} cycle
+                  {todayManualCount > 0 && (
+                    <span className="text-xs text-gray-500 font-normal ml-2">
+                      {tr('autoMode.todayManualNote', { n: todayManualCount })}
+                    </span>
+                  )}
                 </p>
                 <p className="text-xs text-gray-500 mt-0.5">
                   {tr('autoMode.last')}: {lastReasonText}
@@ -1169,9 +1223,11 @@ function AutoModePanel({
                 <p className="text-xs text-gray-200 font-mono leading-relaxed">
                   {times.length > 0 ? times.join(' · ') : '—'}
                 </p>
-                <p className="text-[10px] text-gray-500 mt-0.5">
+                <p className={`text-[10px] mt-0.5 ${scheduleSource === 'none' ? 'text-amber-400/90' : 'text-gray-500'}`}>
                   {scheduleSource === 'backend'
                     ? tr('autoMode.scheduleBackendReady')
+                    : scheduleSource === 'none'
+                    ? tr('autoMode.scheduleNone')
                     : tr('autoMode.scheduleFallback')}
                 </p>
               </div>
@@ -1187,7 +1243,7 @@ function AutoModePanel({
               </p>
               <p className="text-gray-400">
                 {tr('autoMode.dailyFeedAmount')} <span className="font-mono text-gray-200">
-                  {computation.daily_feed_g?.toLocaleString('ko-KR')}g
+                  {computation.daily_feed_g?.toLocaleString(dateLocale())}g
                 </span>
                 {' '}÷ {tr('feedCycle.cyclesPerDay', { n: computation.daily_cycles ?? '—' })} ={' '}
                 <span className="font-mono text-gray-200">{computation.cycle_target_amount_g}g/cycle</span>
@@ -1313,7 +1369,7 @@ function AutoModePanel({
                     >
                       <div className="flex items-baseline gap-2 flex-wrap">
                         <span className="text-amber-300 font-mono text-[10px]">
-                          {new Date(intent.recorded_at).toLocaleString('ko-KR', {
+                          {new Date(intent.recorded_at).toLocaleString(dateLocale(), {
                             month: '2-digit', day: '2-digit',
                             hour: '2-digit', minute: '2-digit',
                           })}
@@ -1734,16 +1790,17 @@ function AutoQuickStart({ tank, computation, disabledReason, onStarted }: AutoQu
       // F.2 — LLM 분석이 있으면 modal 표시
       setLlmModal(intentRes.llm_analysis ? { intentId: intentRes.intent_id, analysis: intentRes.llm_analysis } : null);
       const pattern = computation.feeding_pattern_default;
+      const qEff = getEffectiveTankPolicy(tank.tank_id, tank.group_id ?? '');
       await FeedCycles.start({
         tank_id: tank.tank_id,
         mode: 'adaptive',
         intent_id: intentRes.intent_id,
         params: {
           target_amount_g: computation.cycle_target_amount_g,
-          max_pulses: pattern?.total_pulses,
           max_duration_min: computation.max_duration_min ?? undefined,
-          pulse_duration_ms: pattern?.pulse_duration_ms,
-          gap_ms: pattern?.gap_ms,
+          // onoff_feeder(on/off): run/stop 초로 마이크로펄스 도출(pulse/gap 미전송). ESP32는 무시.
+          run_sec: qEff.feeder_run_sec,
+          stop_sec: qEff.feeder_stop_sec,
           ...(pattern?.speed_rpm ? { speed_rpm: pattern.speed_rpm } : {}),
           ...(pattern?.amount ? { amount: pattern.amount } : {}),
         },
@@ -1857,7 +1914,7 @@ export function FeedCycleMonitor() {
       })
       .catch((err: unknown) => {
         // Non-fatal: show all tanks or empty
-        const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+        const msg = err instanceof Error ? err.message : t('feedCycleMonitor.unknownError');
         console.warn('[FeedCycleMonitor] tanks list failed:', msg);
         setTanks([]);
       })
@@ -1880,17 +1937,19 @@ export function FeedCycleMonitor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTankId, policyVersion, selectedTank?.group_id]);
 
-  // 선택 수조의 정책 계산 (자동 모드 안내용).
+  // 선택 수조의 정책 계산 (자동 모드 안내용). 수온은 실측 우선 (fallback 14℃).
+  const liveTemps2 = useLiveTemps();
   const computation = selectedTank ? (() => {
     const eff = getEffectiveTankPolicy(selectedTank.tank_id, selectedTank.group_id ?? '');
     return computeFeedingPolicy({
       species: selectedTank.species,
       fish_count: selectedTank.fish_count ?? null,
-      avg_weight_g: selectedTank.avg_weight_g ?? null,
+      avg_weight_g: feedingWeightG(selectedTank),
       volume_m3: selectedTank.volume_m3 ?? null,
       bsf_mode: eff.bsf_mode,
-      temperature_c: null,
+      temperature_c: liveTemps2[selectedTank.tank_id] ?? null,
       max_daily_cycles: eff.max_daily_cycles,
+      daily_cycles: eff.daily_cycles,
     });
   })() : null;
 
@@ -1983,9 +2042,10 @@ export function FeedCycleMonitor() {
 
   function handleModeToggle(next: OperatingMode) {
     if (!selectedTank) return;
-    setTankOverride(selectedTank.tank_id, { operating_mode: next });
+    // merge — 통째 교체(setTankOverride)는 수조의 bsf_mode override 를 지운다 (2026-07-08 fix).
+    mergeTankOverride(selectedTank.tank_id, { operating_mode: next });
     setOperatingMode(next);
-    // bluei:feeding-policy-changed 이벤트는 setTankOverride 내부에서 dispatch.
+    // bluei:feeding-policy-changed 이벤트는 store 내부에서 dispatch.
   }
 
   async function handleAdjustSubmit(bsfMode: BsfMode | null, reason: string) {
@@ -1999,7 +2059,7 @@ export function FeedCycleMonitor() {
     // F.2 — LLM 분석이 있으면 modal 표시
     setLlmModal(intentRes.llm_analysis ? { intentId: intentRes.intent_id, analysis: intentRes.llm_analysis } : null);
     if (bsfMode != null) {
-      setTankOverride(selectedTank.tank_id, { bsf_mode: bsfMode });
+      mergeTankOverride(selectedTank.tank_id, { bsf_mode: bsfMode });
     }
   }
 
@@ -2165,8 +2225,8 @@ export function FeedCycleMonitor() {
                         {cycle.pulses_executed}/{cycle.max_pulses ?? '?'} {tr('monitor.pulseUnit')}
                       </p>
                       <p>
-                        {cycle.total_amount_g}
-                        {cycle.target_amount_g != null ? `/${cycle.target_amount_g}` : ''}g
+                        {cycle.total_amount_g.toFixed(1)}
+                        {cycle.target_amount_g != null ? `/${cycle.target_amount_g.toFixed(1)}` : ''}g
                       </p>
                       <p>{ageString(cycle.started_at, tr)}</p>
                     </div>
@@ -2320,7 +2380,7 @@ export function FeedCycleMonitor() {
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">
                         {cycle.completed_at
-                          ? new Date(cycle.completed_at).toLocaleString('ko-KR')
+                          ? new Date(cycle.completed_at).toLocaleString(dateLocale())
                           : '—'}
                       </td>
                     </tr>

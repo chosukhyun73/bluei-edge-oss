@@ -276,6 +276,13 @@ func parseAdaptiveParams(params map[string]any) (feed_cycle.AdaptiveParams, erro
 	if v, ok := params["pulse_duration_ms"]; ok {
 		p.PulseDurationMs = int(toFloat64(v))
 	}
+	// WP-F — onoff_feeder 마이크로펄스 override (그룹정책 입력값). 0/미지정이면 config 기본값.
+	if v, ok := params["run_sec"]; ok {
+		p.RunSec = int(toFloat64(v))
+	}
+	if v, ok := params["stop_sec"]; ok {
+		p.StopSec = int(toFloat64(v))
+	}
 	// Phase A — ESP32 모터 출력 (0 = 펌웨어 default)
 	if v, ok := params["speed_rpm"]; ok {
 		p.SpeedRpm = int(toFloat64(v))
@@ -313,6 +320,12 @@ func parseFixedParams(params map[string]any) (feed_cycle.FixedParams, error) {
 	if v, ok := params["total_pulses"]; ok {
 		p.TotalPulses = int(toFloat64(v))
 	}
+	// 회당 목표량(선택) — 마지막 펄스 트림용. 미지정/0 = 트림 없음.
+	if v, ok := params["target_amount_g"]; ok {
+		if t := toFloat64(v); t > 0 {
+			p.TargetAmountG = t
+		}
+	}
 	if p.PulseDurationMs <= 0 {
 		return p, &ErrInvalidMode{Mode: "fixed: pulse_duration_ms must be > 0"}
 	}
@@ -321,6 +334,19 @@ func parseFixedParams(params map[string]any) (feed_cycle.FixedParams, error) {
 	}
 	if p.TotalPulses <= 0 {
 		return p, &ErrInvalidMode{Mode: "fixed: total_pulses must be > 0"}
+	}
+	if v, ok := params["pulse_durations_ms"]; ok {
+		arr, ok := v.([]any)
+		if !ok {
+			return p, &ErrInvalidMode{Mode: "fixed: pulse_durations_ms must be an array"}
+		}
+		for _, e := range arr {
+			d := int(toFloat64(e))
+			if d < 1000 || d > 10_000 {
+				return p, &ErrInvalidMode{Mode: "fixed: pulse_durations_ms entries must be 1000~10000 ms"}
+			}
+			p.PulseDurationsMs = append(p.PulseDurationsMs, d)
+		}
 	}
 	if v, ok := params["speed_rpm"]; ok {
 		p.SpeedRpm = int(toFloat64(v))

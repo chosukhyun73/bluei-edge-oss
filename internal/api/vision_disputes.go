@@ -18,11 +18,20 @@ type visionObservationDisputeRequest struct {
 	Verdict       string   `json:"verdict"`
 	Reason        string   `json:"reason"`
 	OperatorScore *float64 `json:"operator_score,omitempty"` // G-4: 단일 슬라이더 (legacy)
+	AIScore       *float64 `json:"ai_score,omitempty"`       // 제출 시점 모달 프리필 AI 점수 (수렴 지표 원천)
 	PreScore      *float64 `json:"pre_score,omitempty"`      // R5: 급이 전 안정성 0~1
 	DuringScore   *float64 `json:"during_score,omitempty"`   // R5: 급이 도중 반응 0~1
 	ClipRef       string   `json:"clip_ref,omitempty"`       // R5: observation clip_ref 정합
 	AlgorithmID   string   `json:"algorithm_id,omitempty"`   // R11: 어느 LRCN 모델용 라벨인지
-	DisputedAt    string   `json:"disputed_at"`
+	// 운영자 실배출 관찰 (2026-07-17): full|partial|none — discharge_check 판정의
+	// ground truth. 거짓 no 문제(대리신호 한계)의 정답 데이터 축적.
+	OperatorDischarge string `json:"operator_discharge,omitempty"`
+	// 프리필 조작 여부 (2026-07-23) — false 면 AI 프리필 수락 = 독립 라벨 아님.
+	PrefillModified *bool `json:"prefill_modified,omitempty"`
+	// 배출 ✓/✗ 프리필 조작 여부 (2026-07-30) — PrefillModified 는 점수 슬라이더만
+	// 추적해서, 배출 라벨이 운영자 판단인지 시스템 프리필 수락인지 구분이 안 됐다.
+	DischargeModified *bool  `json:"discharge_modified,omitempty"`
+	DisputedAt        string `json:"disputed_at"`
 }
 
 func (s *Server) handleVisionObservationRoute(w http.ResponseWriter, r *http.Request) {
@@ -76,19 +85,23 @@ func (s *Server) handlePostVisionObservationDispute(w http.ResponseWriter, r *ht
 		req.DisputedAt = common.FormatTime(common.NowUTC())
 	}
 	payload := events.VisionObservationDisputedPayload{
-		DisputeID:     req.DisputeID,
-		ObservationID: observationID,
-		CameraID:      req.CameraID,
-		TankID:        req.TankID,
-		OperatorID:    req.OperatorID,
-		Verdict:       req.Verdict,
-		Reason:        req.Reason,
-		OperatorScore: req.OperatorScore,
-		PreScore:      req.PreScore,
-		DuringScore:   req.DuringScore,
-		ClipRef:       req.ClipRef,
-		AlgorithmID:   req.AlgorithmID,
-		DisputedAt:    req.DisputedAt,
+		DisputeID:         req.DisputeID,
+		ObservationID:     observationID,
+		CameraID:          req.CameraID,
+		TankID:            req.TankID,
+		OperatorID:        req.OperatorID,
+		Verdict:           req.Verdict,
+		Reason:            req.Reason,
+		OperatorScore:     req.OperatorScore,
+		AIScore:           req.AIScore,
+		PreScore:          req.PreScore,
+		DuringScore:       req.DuringScore,
+		ClipRef:           req.ClipRef,
+		AlgorithmID:       req.AlgorithmID,
+		OperatorDischarge: req.OperatorDischarge,
+		PrefillModified:   req.PrefillModified,
+		DischargeModified: req.DischargeModified,
+		DisputedAt:        req.DisputedAt,
 	}
 	if err := payload.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "INVALID_VISION_OBSERVATION_DISPUTE", err.Error(), "")

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"bluei.kr/edge/internal/arbiter"
+	"bluei.kr/edge/internal/capture"
 	"bluei.kr/edge/internal/collector"
 	"bluei.kr/edge/internal/config"
 	"bluei.kr/edge/internal/control"
@@ -22,6 +23,7 @@ import (
 	"bluei.kr/edge/internal/storage"
 	bsync "bluei.kr/edge/internal/sync"
 	"bluei.kr/edge/internal/training"
+	"bluei.kr/edge/internal/vision_pipeline"
 )
 
 // AISchedulerHook — Phase 1e-A.
@@ -51,6 +53,8 @@ type LiveWeightProvider interface {
 
 // Server is the local HTTP API server.
 type Server struct {
+	// svCache — state-vector 결과 캐시(30초). 대시보드 폴링이 백엔드를 포화시키던 것을 막는다.
+	svCache     *stateVectorCache
 	cfg         *config.Config
 	app         *runtime.App
 	store       storage.Store
@@ -64,8 +68,14 @@ type Server struct {
 	llmClient   *llm.Client
 	knowledge   *knowledge.Retriever
 	liveWeight  LiveWeightProvider
+	capture     *capture.Worker
+	liveAgi     func() []vision_pipeline.LiveAgitationSnapshot // 진행 중 라이브 요동 (실시간 표기)
 	httpSrv     *http.Server
 }
+
+// SetCaptureWorker wires the capture worker so the dashboard can start/stop
+// continuous data collection at runtime. Must be called before Start.
+func (s *Server) SetCaptureWorker(w *capture.Worker) { s.capture = w }
 
 // SetLiveWeightProvider wires UDP live-weight cache into the API.
 // Must be called before Start.
@@ -74,6 +84,12 @@ func (s *Server) SetLiveWeightProvider(p LiveWeightProvider) { s.liveWeight = p 
 // SetKnowledgeRetriever wires the RAG knowledge retriever into the assistant.
 // nil 이면 어시스턴트는 RAG 없이 동작. Must be called before Start.
 func (s *Server) SetKnowledgeRetriever(r *knowledge.Retriever) { s.knowledge = r }
+
+// SetLiveAgitationProvider wires the in-memory live agitation snapshot source
+// (급이 중 실시간 요동 곡선). nil 이면 /v1/vision/agitation/live 는 빈 목록.
+func (s *Server) SetLiveAgitationProvider(fn func() []vision_pipeline.LiveAgitationSnapshot) {
+	s.liveAgi = fn
+}
 
 func NewServer(
 	cfg *config.Config,
@@ -88,6 +104,7 @@ func NewServer(
 	llmClient *llm.Client,
 ) *Server {
 	s := &Server{
+		svCache:     newStateVectorCache(),
 		cfg:         cfg,
 		app:         app,
 		store:       store,
@@ -104,8 +121,8 @@ func NewServer(
 	mux.HandleFunc("/healthz", method(http.MethodGet, s.handleHealthz))
 	mux.HandleFunc("/readyz", method(http.MethodGet, s.handleReadyz))
 	mux.HandleFunc("/v1/status", method(http.MethodGet, s.handleStatus))
-	// 페어링 QR 페이로드 — 인증 없음(앱이 스캔하기 전 부트스트랩, 로컬 대시보드용).
-	mux.HandleFunc("/v1/pair", method(http.MethodGet, s.handlePair))
+	// 페어링 QR 페이로드 — 클라우드 sync 토큰을 담으므로 운영자 인증 필요(대시보드는 프록시가 Bearer 주입).
+	mux.HandleFunc("/v1/pair", method(http.MethodGet, s.authMiddleware(s.handlePair)))
 	// Device auth (login bootstrap·session) — 폰 푸시 승인 device-login 흐름. 무인증(부트스트랩).
 	mux.HandleFunc("/v1/device/login/start", method(http.MethodPost, s.handleDeviceLoginStart))
 	mux.HandleFunc("/v1/device/login/status", method(http.MethodGet, s.handleDeviceLoginStatus))
@@ -127,7 +144,9 @@ func NewServer(
 	mux.HandleFunc("/v1/inventory/items", method(http.MethodPost, s.authMiddleware(s.handleCreateInventoryItem)))
 	mux.HandleFunc("/v1/inventory/purchase", method(http.MethodPost, s.authMiddleware(s.handlePurchase)))
 	mux.HandleFunc("/v1/inventory/consume", method(http.MethodPost, s.authMiddleware(s.handleConsume)))
+	mux.HandleFunc("/v1/inventory/purchases", method(http.MethodGet, s.authMiddleware(s.handleListPurchasesHistory)))
 	mux.HandleFunc("/v1/inventory/purchases/", s.authMiddleware(s.handleInventoryPurchasesRoute))
+	mux.HandleFunc("/v1/inventory/items/", s.authMiddleware(s.handleInventoryItemsRoute))
 	// 거래처(공급처/구매처) 마스터 + 거래처 서류.
 	mux.HandleFunc("/v1/partners", s.authMiddleware(s.handlePartnersCollection))
 	mux.HandleFunc("/v1/partners/", s.authMiddleware(s.handlePartnerItemRoute))
@@ -164,6 +183,11 @@ func NewServer(
 	mux.HandleFunc("/v1/feedings/today", method(http.MethodGet, s.authMiddleware(s.handleTodayFeedingSummary)))
 	mux.HandleFunc("/v1/feedings/impact/", method(http.MethodGet, s.authMiddleware(s.handleFeedingImpactRoute)))
 	mux.HandleFunc("/v1/water-quality/buckets", method(http.MethodGet, s.authMiddleware(s.handleWaterQualityBuckets)))
+	mux.HandleFunc("/v1/chiller/energy", method(http.MethodGet, s.authMiddleware(s.handleChillerEnergy)))
+	mux.HandleFunc("/v1/chiller/control", method(http.MethodPost, s.authMiddleware(s.handleChillerControl)))
+	mux.HandleFunc("/v1/optimize/temp", method(http.MethodGet, s.authMiddleware(s.handleOptimizeTemp)))
+	mux.HandleFunc("/v1/optimize/temp/params", s.authMiddleware(s.handleOptimizeTempParams))
+	mux.HandleFunc("/v1/optimize/temp/mode", s.authMiddleware(s.handleOptimizeTempMode))
 	mux.HandleFunc("/v1/vision/algorithms", method(http.MethodGet, s.authMiddleware(s.handleVisionAlgorithms)))
 	mux.HandleFunc("/v1/vision/tank-applications", method(http.MethodGet, s.authMiddleware(s.handleVisionTankApplications)))
 	mux.HandleFunc("/v1/vision/observations", s.authMiddleware(s.handleVisionObservationsRoute))
@@ -173,11 +197,26 @@ func NewServer(
 	mux.HandleFunc("/v1/vision/training/jobs", s.authMiddleware(s.handleTrainingJobsRoute))
 	mux.HandleFunc("/v1/vision/training/jobs/", s.authMiddleware(s.handleTrainingJobRoute))
 	mux.HandleFunc("/v1/vision/training-pool", method(http.MethodGet, s.authMiddleware(s.handleVisionTrainingPool)))
+	mux.HandleFunc("/v1/vision/segments", method(http.MethodGet, s.authMiddleware(s.handleVisionSegments)))
+	mux.HandleFunc("/v1/vision/segment-labels", s.authMiddleware(s.handleVisionSegmentLabels))
+	mux.HandleFunc("/v1/vision/segment-labels/manifest", method(http.MethodGet, s.authMiddleware(s.handleVisionSegmentLabelManifest)))
+	mux.HandleFunc("/v1/vision/floor-stills", s.authMiddleware(s.handleVisionFloorStills))
+	mux.HandleFunc("/v1/vision/floor-stills/image", method(http.MethodGet, s.authMiddleware(s.handleVisionFloorStillImage)))
+	mux.HandleFunc("/v1/vision/floor-stills/label", s.authMiddleware(s.handleVisionFloorStillLabel))
+	mux.HandleFunc("/v1/vision/agitation", method(http.MethodGet, s.authMiddleware(s.handleVisionAgitation)))
+	mux.HandleFunc("/v1/vision/agitation/recent", method(http.MethodGet, s.authMiddleware(s.handleVisionAgitationRecent)))
+	mux.HandleFunc("/v1/vision/agitation/baseline", method(http.MethodGet, s.authMiddleware(s.handleVisionAgitationBaseline)))
+	mux.HandleFunc("/v1/vision/agitation/live", method(http.MethodGet, s.authMiddleware(s.handleVisionAgitationLive)))
+	mux.HandleFunc("/v1/vision/model-scores/recent", method(http.MethodGet, s.authMiddleware(s.handleVisionModelScoresRecent)))
+	mux.HandleFunc("/v1/vision/agitation/backfill", method(http.MethodPost, s.authMiddleware(s.handleVisionAgitationBackfill)))
 	mux.HandleFunc("/v1/vision/feeding-score", method(http.MethodPost, s.authMiddleware(s.handlePostFeedingScore)))
 	mux.HandleFunc("/v1/vision/algorithms/", s.authMiddleware(s.handleVisionAlgorithmActionRoute))
 	mux.HandleFunc("/v1/media/clips", s.authMiddleware(s.handleMediaClipsRoute))
 	mux.HandleFunc("/v1/media/clips/", s.authMiddleware(s.handleMediaClipStream))
 	mux.HandleFunc("/v1/capture/disk", method(http.MethodGet, s.authMiddleware(s.handleCaptureDisk)))
+	mux.HandleFunc("/v1/capture/status", method(http.MethodGet, s.authMiddleware(s.handleCaptureStatus)))
+	mux.HandleFunc("/v1/capture/start", method(http.MethodPost, s.authMiddleware(s.handleCaptureStart)))
+	mux.HandleFunc("/v1/capture/stop", method(http.MethodPost, s.authMiddleware(s.handleCaptureStop)))
 	mux.HandleFunc("/v1/gateway/readings", method(http.MethodPost, s.authMiddleware(s.handlePostGatewayReadings)))
 	mux.HandleFunc("/v1/gateway/device-health", method(http.MethodPost, s.authMiddleware(s.handlePostGatewayDeviceHealth)))
 	mux.HandleFunc("/v1/farms", s.authMiddleware(s.handleFarmsRoute))
@@ -193,6 +232,7 @@ func NewServer(
 	mux.HandleFunc("/v1/species-profiles", s.authMiddleware(s.handleSpeciesProfilesRoute))
 	mux.HandleFunc("/v1/species-profiles/", s.authMiddleware(s.handleSpeciesProfileItem))
 	mux.HandleFunc("/v1/controllers", s.authMiddleware(s.handleControllerRoute))
+	mux.HandleFunc("/v1/controllers/feeder-register", s.authMiddleware(s.handleRegisterOnoffFeeder))
 	mux.HandleFunc("/v1/controllers/", s.authMiddleware(s.handleControllerRoute))
 	// ESP32 provisioning (USB flash + 등록 자동화)
 	mux.HandleFunc("/v1/provision", method(http.MethodPost, s.authMiddleware(s.handleProvisionStart)))
@@ -205,7 +245,12 @@ func NewServer(
 	mux.HandleFunc("/v1/setup/draft/validate", method(http.MethodGet, s.authMiddleware(s.handleSetupDraftValidate)))
 	mux.HandleFunc("/v1/setup/draft/preview", method(http.MethodGet, s.authMiddleware(s.handleSetupDraftPreview)))
 	mux.HandleFunc("/v1/feed-cycles", s.authMiddleware(s.handleFeedCyclesRoute))
+	// 정확 경로가 아래 prefix("/v1/feed-cycles/") 보다 우선 매칭됨 (ServeMux 규칙).
+	mux.HandleFunc("/v1/feed-cycles/reports", method(http.MethodGet, s.authMiddleware(s.handleFeedCycleReports)))
 	mux.HandleFunc("/v1/feed-cycles/", s.authMiddleware(s.handleFeedCycleRoute))
+	// 외부 환경 시계열 (NIFS 연안 수온) — 수온 차트 오버레이 (2026-07-17)
+	mux.HandleFunc("/v1/external-env", method(http.MethodGet, s.authMiddleware(s.handleExternalEnv)))
+	mux.HandleFunc("/v1/site-env/daily", method(http.MethodGet, s.authMiddleware(s.handleSiteEnvDaily)))
 	mux.HandleFunc("/v1/feeding-schedules", s.authMiddleware(s.handleFeedingSchedulesRoute))
 	mux.HandleFunc("/v1/feeding-schedules/", s.authMiddleware(s.handleFeedingScheduleRoute))
 	// Phase 4 D-7 + C-3p predictive endpoints (read-only)

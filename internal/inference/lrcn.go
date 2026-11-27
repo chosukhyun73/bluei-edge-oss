@@ -32,6 +32,9 @@ type LRCNConfig struct {
 type LRCNClient struct {
 	endpoint string
 	client   *http.Client
+	// segClient — 세그먼트 일괄 채점 전용. 세그먼트당 수 초 × 최대 8펄스 + CPU 경합
+	// 여유라 통클립용 timeout 으로는 부족하다.
+	segClient *http.Client
 }
 
 // NewLRCNClient constructs a client with sensible defaults.
@@ -45,8 +48,9 @@ func NewLRCNClient(cfg LRCNConfig) *LRCNClient {
 		timeout = 15 * time.Second
 	}
 	return &LRCNClient{
-		endpoint: endpoint,
-		client:   &http.Client{Timeout: timeout},
+		endpoint:  endpoint,
+		client:    &http.Client{Timeout: timeout},
+		segClient: &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
@@ -118,6 +122,90 @@ func (c *LRCNClient) Score(ctx context.Context, req LRCNRequest) (LRCNResponse, 
 	}
 	if out.FeedingActivityScore > 1 {
 		out.FeedingActivityScore = 1
+	}
+	return out, nil
+}
+
+// LRCNSegmentWindow mirrors services/lrcn/server.py:SegmentWindow.
+type LRCNSegmentWindow struct {
+	PulseNo       int `json:"pulse_no"`
+	OffsetStartMs int `json:"offset_start_ms"`
+	OffsetEndMs   int `json:"offset_end_ms"`
+}
+
+// LRCNSegmentScoresRequest mirrors services/lrcn/server.py:SegmentScoresRequest.
+type LRCNSegmentScoresRequest struct {
+	ClipPath  string              `json:"clip_path"`
+	Segments  []LRCNSegmentWindow `json:"segments"`
+	TankID    string              `json:"tank_id,omitempty"`
+	MaxFrames int                 `json:"max_frames,omitempty"`
+}
+
+// LRCNSegmentScore mirrors services/lrcn/server.py:SegmentScore.
+// FeedingScore 가 nil 이면 해당 세그먼트 채점 실패 (Error 에 사유).
+type LRCNSegmentScore struct {
+	PulseNo      int      `json:"pulse_no"`
+	FeedingScore *float64 `json:"feeding_score"`
+	Error        string   `json:"error,omitempty"`
+}
+
+// LRCNSegmentScoresResponse mirrors services/lrcn/server.py:SegmentScoresResponse.
+type LRCNSegmentScoresResponse struct {
+	ModelVersion string             `json:"model_version"`
+	Scores       []LRCNSegmentScore `json:"scores"`
+	InferenceMs  int                `json:"inference_ms"`
+}
+
+// SegmentScores scores per-pulse segment windows of a clip with the 2-head
+// segments model (feeding head). Advisory only — 모달 프리필/학습 보조 신호.
+func (c *LRCNClient) SegmentScores(ctx context.Context, req LRCNSegmentScoresRequest) (LRCNSegmentScoresResponse, error) {
+	if strings.TrimSpace(req.ClipPath) == "" || len(req.Segments) == 0 {
+		return LRCNSegmentScoresResponse{}, errors.New("lrcn: clip_path and segments required")
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return LRCNSegmentScoresResponse{}, fmt.Errorf("lrcn: marshal request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, c.endpoint+"/v1/segment-scores", bytes.NewReader(body),
+	)
+	if err != nil {
+		return LRCNSegmentScoresResponse{}, fmt.Errorf("lrcn: create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.segClient.Do(httpReq)
+	if err != nil {
+		return LRCNSegmentScoresResponse{}, fmt.Errorf("lrcn: request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		return LRCNSegmentScoresResponse{}, ErrLRCNModelNotReady
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return LRCNSegmentScoresResponse{}, fmt.Errorf(
+			"lrcn: status %d body=%s",
+			resp.StatusCode, strings.TrimSpace(string(bodyBytes)),
+		)
+	}
+
+	var out LRCNSegmentScoresResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return LRCNSegmentScoresResponse{}, fmt.Errorf("lrcn: decode response: %w", err)
+	}
+	// Defensive clamp — 서버가 [0,1] 을 보장해야 하지만 추론 출력은 무조건 신뢰하지 않는다.
+	for i := range out.Scores {
+		if s := out.Scores[i].FeedingScore; s != nil {
+			if *s < 0 {
+				zero := 0.0
+				out.Scores[i].FeedingScore = &zero
+			} else if *s > 1 {
+				one := 1.0
+				out.Scores[i].FeedingScore = &one
+			}
+		}
 	}
 	return out, nil
 }

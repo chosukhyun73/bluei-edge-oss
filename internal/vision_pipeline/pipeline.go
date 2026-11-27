@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"bluei.kr/edge/internal/capture"
@@ -49,7 +50,21 @@ func New(lrcn LRCNScorer, sink EventSink) *Pipeline {
 // OnCaptureResult — capture.Worker 의 SetOnResult callback 으로 등록.
 // capture goroutine 안에서 sync 호출됨. LRCN CPU 1~2s 소요.
 func (p *Pipeline) OnCaptureResult(ctx context.Context, r *capture.Result) {
-	if p == nil || r == nil || p.lrcn == nil || p.sink == nil {
+	if p == nil || r == nil || p.sink == nil {
+		return
+	}
+	// 신호게이팅 급이 클립 — 수면 요동(먹이반응 프록시) 곡선을 비동기 계산·적재.
+	// LRCN 과 독립 (모델 미기동이어도 학습 라벨 데이터는 쌓인다). 실패는 warn 만.
+	if r.Reason == capture.ReasonFeedCycleGated {
+		go p.recordAgitation(r)
+	}
+	if p.lrcn == nil {
+		return
+	}
+	// LRCN(먹이반응) 라인은 탑뷰 전용 (2026-07-17 운영자 확정): 수중캠 클립은
+	// LRCN 추론·학습에서 제외하고 별도 라인(세그먼트 채점 → 어체 마스킹 파일럿)
+	// 으로만 쓴다. 요동곡선(위)은 전 카메라 유지 — 판정·prior 가 소비.
+	if strings.Contains(r.CameraID, "underwater") {
 		return
 	}
 	log := p.log.With("cycle_id", r.CycleID, "tank_id", r.TankID, "camera_id", r.CameraID)

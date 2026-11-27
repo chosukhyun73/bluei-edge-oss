@@ -83,6 +83,11 @@ func (s *Server) handleControllerRoute(w http.ResponseWriter, r *http.Request) {
 		s.handlePostControllerManualTrigger(w, r, controllerID)
 		return
 	}
+	// POST /v1/controllers/{id}/feed — onoff 급이기 제어(setpoint control). ⚠ confirm=true 시 실작동.
+	if commandID == "" && action == "feed" && r.Method == http.MethodPost {
+		s.handleFeederControl(w, r, controllerID)
+		return
+	}
 	// GET /v1/controllers/{id}/live-weight — B-7: UDP weight cache (1Hz fresh)
 	if commandID == "" && action == "live-weight" && r.Method == http.MethodGet {
 		s.handleGetControllerLiveWeight(w, r, controllerID)
@@ -513,7 +518,7 @@ func parseControllerPath(path string) (controllerID, commandID, action string, o
 		return parts[0], "", "", true
 	}
 	// /v1/controllers/{id}/activate | /test | /weight | /manual-trigger
-	if len(parts) == 2 && (parts[1] == "activate" || parts[1] == "test" || parts[1] == "weight" || parts[1] == "manual-trigger" || parts[1] == "live-weight") {
+	if len(parts) == 2 && (parts[1] == "activate" || parts[1] == "test" || parts[1] == "weight" || parts[1] == "manual-trigger" || parts[1] == "live-weight" || parts[1] == "feed") {
 		return parts[0], "", parts[1], true
 	}
 	// /v1/controllers/{id}/commands/next

@@ -223,6 +223,7 @@ CREATE TABLE IF NOT EXISTS current_tank_sampling (
   std_weight_g         REAL,
   min_weight_g         REAL,
   max_weight_g         REAL,
+  avg_length_cm        REAL,
   health_score         INTEGER,
   health_notes         TEXT,
   abnormal_count       INTEGER,
@@ -312,6 +313,24 @@ func openTestStore(t *testing.T) storage.Store {
 		t.Fatalf("Migrate: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
+	return store
+}
+
+// openHatcheryTestStore — openTestStore + hatchery migration (037~040) 적용.
+// 인라인 migSQL 에는 hatchery 테이블이 없어 실 migration 파일을 얹는다
+// (openFeedCycleTestStore 와 동일 패턴).
+func openHatcheryTestStore(t *testing.T) storage.Store {
+	t.Helper()
+	store := openTestStore(t)
+	migDir := findMigDirForFC(t)
+	for _, name := range []string{
+		"037_broodstock.sql", "038_spawn_batches.sql",
+		"039_larval_livefeed.sql", "040_hatchery_treatments.sql",
+	} {
+		if err := storage.Migrate(store, filepath.Join(migDir, name)); err != nil {
+			t.Fatalf("migrate %s: %v", name, err)
+		}
+	}
 	return store
 }
 

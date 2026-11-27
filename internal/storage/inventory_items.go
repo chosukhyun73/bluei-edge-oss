@@ -14,8 +14,8 @@ func (s *sqliteStore) UpsertInventoryItem(ctx context.Context, item *InventoryIt
 	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO inventory_items(
-		   item_id,category,name,unit,on_hand_qty,spec,supplier,reorder_level,notes,created_at,updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?)
+		   item_id,category,name,unit,on_hand_qty,spec,supplier,reorder_level,notes,composition_json,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(item_id) DO UPDATE SET
 		   category=excluded.category,
 		   name=excluded.name,
@@ -25,6 +25,7 @@ func (s *sqliteStore) UpsertInventoryItem(ctx context.Context, item *InventoryIt
 		   supplier=excluded.supplier,
 		   reorder_level=excluded.reorder_level,
 		   notes=excluded.notes,
+		   composition_json=excluded.composition_json,
 		   updated_at=excluded.updated_at`,
 		item.ItemID,
 		item.Category,
@@ -35,23 +36,38 @@ func (s *sqliteStore) UpsertInventoryItem(ctx context.Context, item *InventoryIt
 		nullStr(item.Supplier),
 		reorder,
 		nullStr(item.Notes),
+		nullStr(item.CompositionJSON),
 		fmtTime(item.CreatedAt),
 		fmtTime(item.UpdatedAt),
 	)
 	return err
 }
 
+// SetInventoryComposition — 품목 영양성분표(JSON)만 갱신. 빈 문자열이면 NULL(미등록).
+func (s *sqliteStore) SetInventoryComposition(ctx context.Context, itemID, compJSON string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE inventory_items SET composition_json=?, updated_at=? WHERE item_id=?`,
+		nullStr(compJSON), fmtNow(), itemID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("inventory item not found: %s", itemID)
+	}
+	return nil
+}
+
 func (s *sqliteStore) GetInventoryItem(ctx context.Context, itemID string) (*InventoryItem, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT item_id,category,name,unit,on_hand_qty,COALESCE(spec,''),COALESCE(supplier,''),
-		        reorder_level,COALESCE(notes,''),created_at,updated_at
+		        reorder_level,COALESCE(notes,''),COALESCE(composition_json,''),created_at,updated_at
 		 FROM inventory_items WHERE item_id=?`, itemID)
 	return scanInventoryItem(row)
 }
 
 func (s *sqliteStore) ListInventoryItems(ctx context.Context, category string) ([]*InventoryItem, error) {
 	query := `SELECT item_id,category,name,unit,on_hand_qty,COALESCE(spec,''),COALESCE(supplier,''),
-	                 reorder_level,COALESCE(notes,''),created_at,updated_at
+	                 reorder_level,COALESCE(notes,''),COALESCE(composition_json,''),created_at,updated_at
 	          FROM inventory_items`
 	args := []any{}
 	if category != "" {
@@ -113,7 +129,7 @@ func scanInventoryRow(sc rowScanner) (*InventoryItem, error) {
 	var createdAt, updatedAt string
 	if err := sc.Scan(
 		&item.ItemID, &item.Category, &item.Name, &item.Unit, &item.OnHandQty,
-		&item.Spec, &item.Supplier, &reorder, &item.Notes, &createdAt, &updatedAt,
+		&item.Spec, &item.Supplier, &reorder, &item.Notes, &item.CompositionJSON, &createdAt, &updatedAt,
 	); err != nil {
 		return nil, err
 	}

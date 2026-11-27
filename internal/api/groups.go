@@ -42,6 +42,13 @@ func (s *Server) handleGroupRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// /v1/groups/{group_id}/feeding-guidance — 급이 판단 가이드 (수온 급변 시 보류/감량)
+	// 수조가 아니라 그룹 단위다 — RAS 단일 순환수라 그룹 안 수온이 모두 같다.
+	if len(parts) > 1 && parts[1] == "feeding-guidance" {
+		s.handleGroupFeedingGuidance(w, r, groupID)
+		return
+	}
+
 	// /v1/groups/{group_id}/tanks
 	if len(parts) > 1 && parts[1] == "tanks" {
 		if r.Method != http.MethodGet {
@@ -105,10 +112,13 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := groupFromRequest(req)
+	// 대시보드는 그룹 설정 저장도 이 POST(upsert)로 보낸다 — 기존 값과 비교해 이력 기록.
+	before, _ := s.store.GetGroupProfile(r.Context(), p.GroupID)
 	if err := s.store.UpsertGroupProfile(r.Context(), p); err != nil {
 		writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
 		return
 	}
+	s.logGroupChange(r.Context(), before, p)
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "item": p})
 }
 
@@ -138,6 +148,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request, group
 		writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
 		return
 	}
+	s.logGroupChange(r.Context(), existing, p)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": p})
 }
 
@@ -189,9 +200,11 @@ func (s *Server) handleListTanksByGroup(w http.ResponseWriter, r *http.Request, 
 	if tanks == nil {
 		tanks = make([]*storage.TankProfile, 0)
 	}
+	// 추정 체중 동봉 — 대시보드 그룹 헤더가 쓰는 경로가 여기다(App.tsx → Groups.tanks).
+	// /v1/tanks 에만 넣었다가 화면이 안 바뀌어 2026-09-07 에 추가했다.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"group_id": groupID,
-		"items":    tanks,
+		"items":    s.withWeightEstimate(r, tanks),
 		"count":    len(tanks),
 	})
 }

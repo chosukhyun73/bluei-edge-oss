@@ -35,6 +35,9 @@ type operatorIntentRequest struct {
 	IntentType        string         `json:"intent_type"` // 'feed_now' | 'skip_cycle' | 'change_pattern' | 'general_note'
 	Reason            string         `json:"reason"`
 	Context           map[string]any `json:"context"`
+	// SkipLLM — 즉시 실행 경로(카메라 뷰 수동 시작 등): 의도는 기록하되 동기 LLM 종합판단(25~150s)을
+	// 건너뛴다. AI 검수 흐름(타일/사료공급 탭)과 구분 (2026-07-04).
+	SkipLLM bool `json:"skip_llm"`
 }
 
 func (s *Server) handlePostOperatorIntent(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +95,7 @@ func (s *Server) handlePostOperatorIntent(w http.ResponseWriter, r *http.Request
 	// 운영자 reason + 컨텍스트 → LLM analysis. 응답에 포함하고 operator_intents.context_json
 	// 에도 저장. LLM 실패 시 응답은 정상 (분석 없음).
 	resp := map[string]any{"intent_id": intent.IntentID}
-	if s.llmClient != nil && req.TankID != "" && req.Reason != "" {
+	if s.llmClient != nil && !req.SkipLLM && req.TankID != "" && req.Reason != "" {
 		// API server global WriteTimeout(=request_timeout_sec) 가 짧아 LLM 호출 도중 connection 끊김.
 		// 이 endpoint 만 per-response write deadline 해제 (camera_mjpeg 와 같은 패턴).
 		if rc := http.NewResponseController(w); rc != nil {

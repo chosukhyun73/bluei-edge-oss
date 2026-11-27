@@ -1,4 +1,4 @@
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 import type { VisionTrainingStatus } from '../../lib/types';
 
 type PhaseStatus = 'done' | 'active' | 'pending';

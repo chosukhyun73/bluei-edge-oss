@@ -1,0 +1,26 @@
+[Unit]
+Description=bluei-lrcn — LRCN feeding-activity inference server (port 8081, in-place quick install)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bluei
+# repo root 필수 — server.py 의 manifest hot-reload 경로가 상대경로
+# (local-ai/models/active/manifest.json).
+WorkingDirectory=/home/bluei/projects/bluei-edge
+Environment=LRCN_WEIGHTS_REACTION=/home/bluei/projects/bluei-edge/local-ai/models/blueocean-baseline/bootstrap-2026-05-21-blueocean-final.pt
+Environment=LRCN_WEIGHTS_BASELINE=/home/bluei/projects/bluei-edge/local-ai/models/blueocean-baseline/bootstrap-2026-05-21-blueocean-final.pt
+# GPU(GB10) 추론 — venv torch cu130 검증 2026-07-18 (세그먼트 채점 4.6s→GPU 단축).
+ExecStart=/home/bluei/projects/bluei-edge/local-ai/training/.venv-convert/bin/python -m services.lrcn.server --port 8081 --device cuda
+Restart=always
+RestartSec=5s
+# 메모리 백스톱 — 전량 디코드 누적(2026-07-05, RSS 15.5GB 실측)은 preprocess fix 로
+# 해소됐지만, 재발 시 시스템(121GB) OOM 전에 이 유닛만 kill+재기동.
+MemoryMax=24G
+TimeoutStopSec=20s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

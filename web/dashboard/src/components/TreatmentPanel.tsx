@@ -5,7 +5,7 @@ import type {
   SpawnBatch, LarvalBatch, Tank,
 } from '../lib/types';
 import { HatcheryTreatments as TreatmentApi, SpawnBatches, LarvalBatches, Groups, ApiError } from '../lib/api';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 import { ConfirmDialog } from './ui/confirm-dialog';
 
 const FIELD = 'w-full mt-1 px-3 py-2 bg-black/50 border border-gray-700 rounded text-sm text-white focus:outline-none focus:border-green-500/60';

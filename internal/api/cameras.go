@@ -18,6 +18,11 @@ import (
 	"bluei.kr/edge/internal/storage"
 )
 
+// cameraSnapshotFreshMaxAge — 스냅샷이 이보다 오래된 프레임이면 "정지"로 간주.
+// 카메라는 ~10fps(100ms)로 publish 하므로 5s 는 정상 대비 넉넉하고, 순간 끊김은
+// 견디되 실제 프리즈는 ~5s 안에 offline 로 전환한다.
+const cameraSnapshotFreshMaxAge = 5 * time.Second
+
 type cameraProfileRequest struct {
 	CameraID          string         `json:"camera_id"`
 	TankID            string         `json:"tank_id"`
@@ -268,7 +273,10 @@ func (s *Server) handleCameraSnapshot(w http.ResponseWriter, r *http.Request, ca
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	frame, ok := worker.Hub.WaitLatest(ctx)
+	// stale 프레임 방어 — 업스트림 단절 시 Hub 는 마지막 프레임을 계속 보관한다.
+	// maxAge 초과면 새 프레임을 기다렸다가 없으면 504 → 프론트가 정지화면을 LIVE 로
+	// 표시하지 않고 offline 로 전환(2026-07-05).
+	frame, ok := worker.Hub.WaitLatestFresh(ctx, cameraSnapshotFreshMaxAge)
 	if !ok {
 		writeError(w, http.StatusGatewayTimeout, "CAMERA_SNAPSHOT_TIMEOUT", "latest camera frame is not ready", "")
 		return

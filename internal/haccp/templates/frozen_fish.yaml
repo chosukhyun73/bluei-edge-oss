@@ -1,0 +1,131 @@
+# 냉동어류 표준 템플릿.
+# 공정 구성과 수치는 한국식품안전관리인증원 「소규모 냉동수산식품 표준기준서」(2022 개정)의
+# 예시를 바탕으로 bluei 가 다시 정리한 것이다. 수치는 예시이며, 공장은 자기 조건에 맞게
+# 한계기준을 정하고 근거를 남긴 뒤 항목별로 확인해야 게시할 수 있다.
+id: frozen_fish
+name: 냉동어류
+product_group: frozen_fish
+source: 한국식품안전관리인증원 소규모 냉동수산식품 표준기준서(2022 개정)
+notice: 수치는 예시입니다. 자사 조건으로 설정하고 검증한 뒤 확인하십시오.
+content:
+  product:
+    name: ""
+    food_type: 냉동수산식품(냉동어류)
+    form: 냉동
+    storage: 냉동 보관·유통(-18℃ 이하)
+    intended_use: 가열 조리 후 섭취
+    consumers: 일반 소비자
+  team: []
+  steps:
+    - {step_id: receive, name: 원료 입고·보관, method: 냉동 원료 입고 검수 후 냉동 보관}
+    - {step_id: thaw, name: 해동, method: 유수 또는 냉장 해동}
+    - {step_id: sort, name: 분리, method: 크기·상태별 분리}
+    - {step_id: gut, name: 내장 제거, method: 내장·불가식 부위 제거}
+    - {step_id: wash, name: 세척, method: 흐르는 물로 세척}
+    - {step_id: arrange, name: 나열, method: 동결 팬에 나열}
+    - {step_id: freeze, name: 급속동결, method: 급속동결기 동결}
+    - {step_id: cut, name: 절단, method: 규격에 맞게 절단}
+    - {step_id: glaze, name: 글레이징, method: 빙의 입히기}
+    - {step_id: weigh, name: 계량, method: 규격 중량 계량}
+    - {step_id: metal, name: 금속검출, method: 금속검출기 통과}
+    - {step_id: inner_pack, name: 내포장, method: 내포장재에 담아 밀봉}
+    - {step_id: outer_pack, name: 외포장, method: 상자 포장·표시}
+    - {step_id: store_ship, name: 보관·출고, method: 냉동 보관 후 출고}
+    - {step_id: pack_receive, name: 포장재 입고·보관, method: 포장재 입고 검수 후 보관}
+    - {step_id: water, name: 용수, method: 세척용 용수 공급}
+  links:
+    - {link_id: l01, from: receive, to: thaw, flow_kind: product}
+    - {link_id: l02, from: thaw, to: sort, flow_kind: product}
+    - {link_id: l03, from: sort, to: gut, flow_kind: product}
+    - {link_id: l04, from: gut, to: wash, flow_kind: product}
+    - {link_id: l05, from: wash, to: arrange, flow_kind: product}
+    - {link_id: l06, from: arrange, to: freeze, flow_kind: product}
+    - {link_id: l07, from: freeze, to: cut, flow_kind: product}
+    - {link_id: l08, from: cut, to: glaze, flow_kind: product}
+    - {link_id: l09, from: glaze, to: weigh, flow_kind: product}
+    - {link_id: l10, from: weigh, to: metal, flow_kind: product}
+    - {link_id: l11, from: metal, to: inner_pack, flow_kind: product}
+    - {link_id: l12, from: inner_pack, to: outer_pack, flow_kind: product}
+    - {link_id: l13, from: outer_pack, to: store_ship, flow_kind: product}
+    - {link_id: l14, from: pack_receive, to: inner_pack, flow_kind: packaging}
+    - {link_id: l15, from: water, to: wash, flow_kind: water}
+  hazards:
+    - hazard_id: hz_wash_bio
+      step_id: wash
+      category: B
+      name: 병원성 미생물 잔존
+      cause: 세척 시간·세척수량 부족, 원료 과다 투입
+      severity: 3
+      likelihood: 2
+      significant: true
+      control_measure: 세척 시간·세척수량·원료 투입량 관리
+      source_ref: 한국식품안전관리인증원 소규모 냉동수산식품 표준기준서(2022 개정)
+    - hazard_id: hz_metal
+      step_id: metal
+      category: P
+      name: 금속 이물
+      cause: 원료 유래 또는 설비 파손으로 금속 조각 혼입
+      severity: 3
+      likelihood: 2
+      significant: true
+      control_measure: 금속검출기 통과와 감도 점검
+      source_ref: 한국식품안전관리인증원 소규모 냉동수산식품 표준기준서(2022 개정)
+  ccps:
+    - ccp_id: ccp_wash
+      code: CCP-1B
+      name: 세척
+      scope_kind: step
+      step_ids: [wash]
+      hazard_ids: [hz_wash_bio]
+      corrective_action: 세척 조건을 바로잡고, 기준에 못 미친 원료는 다시 세척한다. 원인과 조치를 기록한다.
+      verification: 세척 기록 검토, 유량계·저울 정확도 점검, 세척 후 미생물 검사
+      limits:
+        - limit_id: lim_wash_time
+          item: wash_time
+          rule_kind: instant
+          min: 5
+          unit: min
+          source_kind: sensor
+          automation_level: auto_measure
+          basis_ref: 표준기준서 예시값(5분 이상). 자사 검증 필요
+        - limit_id: lim_wash_flow
+          item: wash_water_flow
+          rule_kind: instant
+          min: 20
+          unit: L/min
+          source_kind: sensor
+          automation_level: auto_measure
+          basis_ref: 표준기준서 예시값(분당 20L 이상). 자사 검증 필요
+        - limit_id: lim_wash_feed
+          item: raw_feed_rate
+          rule_kind: instant
+          max: 8
+          unit: kg/min
+          source_kind: sensor
+          automation_level: auto_measure
+          basis_ref: 표준기준서 예시값(분당 8kg 이하). 자사 검증 필요
+    - ccp_id: ccp_metal
+      code: CCP-2P
+      name: 금속검출
+      scope_kind: step
+      step_ids: [metal]
+      hazard_ids: [hz_metal]
+      corrective_action: 검출된 제품을 따로 두고 다시 통과시켜 확인한다. 검출기 이상이면 직전 정상 점검 이후 제품을 모두 다시 통과시킨다.
+      verification: 금속검출 기록 검토, 시편 통과 점검, 검출기 정기 점검
+      limits:
+        - limit_id: lim_metal_detect
+          item: metal_detected_count
+          rule_kind: count
+          max: 0
+          unit: ea
+          source_kind: sensor
+          automation_level: auto_observe
+          basis_ref: 표준기준서 예시값(Fe·STS 2mm 이상 불검출). 자사 검증 필요
+        - limit_id: lim_metal_test
+          item: test_piece_check
+          rule_kind: periodic_check
+          params: {interval_min: 120}
+          unit: min
+          source_kind: sensor
+          automation_level: auto_observe
+          basis_ref: 인증원 스마트해썹 등록 가이드 예시(작업 전·중 2시간마다·후). 자사 계획에 맞게 설정

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -186,11 +187,12 @@ func (s *Server) handlePostTreatment(w http.ResponseWriter, r *http.Request, tan
 // ── POST /v1/tanks/{id}/mortality ────────────────────────────────────────────
 
 type tankMortalityRequest struct {
-	DeadCount      int    `json:"dead_count"`
-	EstimatedCause string `json:"estimated_cause"`
-	ObservedAt     string `json:"observed_at"`
-	OperatorID     string `json:"operator_id"`
-	Notes          string `json:"notes"`
+	DeadCount      int     `json:"dead_count"`
+	DeadWeightG    float64 `json:"dead_weight_g"`
+	EstimatedCause string  `json:"estimated_cause"`
+	ObservedAt     string  `json:"observed_at"`
+	OperatorID     string  `json:"operator_id"`
+	Notes          string  `json:"notes"`
 }
 
 func (s *Server) handlePostMortality(w http.ResponseWriter, r *http.Request, tankID string) {
@@ -219,6 +221,7 @@ func (s *Server) handlePostMortality(w http.ResponseWriter, r *http.Request, tan
 		StockingID:     stockingID,
 		LotNo:          lotNo,
 		DeadCount:      req.DeadCount,
+		DeadWeightG:    req.DeadWeightG,
 		EstimatedCause: req.EstimatedCause,
 		ObservedAt:     req.ObservedAt,
 		OperatorID:     req.OperatorID,
@@ -237,6 +240,10 @@ func (s *Server) handlePostMortality(w http.ResponseWriter, r *http.Request, tan
 		return
 	}
 
+	// 폐사 반영 — tank_profiles 마리수 = 입식 + 증감(폐사·분조·합치기·부분출하), biomass = 마리수×평균중량.
+	// 이벤트가 정본이라 실패해도 재시작 재동기(main.go)가 복구. best-effort.
+	s.applyFishCountToProfile(r.Context(), tankID)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"sequence":     seq,
@@ -246,6 +253,31 @@ func (s *Server) handlePostMortality(w http.ResponseWriter, r *http.Request, tan
 		"dead_count":   req.DeadCount,
 		"observed_at":  req.ObservedAt,
 	})
+}
+
+// applyFishCountToProfile — 활성 입식 기준으로 tank_profiles 의 마리수·biomass 를
+// (입식 + SumTankCountAdjustment) 로 갱신한다. 급이량은 fish_count×avg_weight 로 계산되므로 자동 반영.
+// 이벤트가 정본 — 여기 실패해도 재시작 재동기(main.go)가 같은 계산으로 복구한다.
+func (s *Server) applyFishCountToProfile(ctx context.Context, tankID string) {
+	lc, err := s.store.GetTankLifecycle(ctx, tankID)
+	if err != nil || lc == nil || lc.Status != "active" {
+		return
+	}
+	adj, err := s.store.SumTankCountAdjustment(ctx, tankID, lc.ActiveStockingID)
+	if err != nil {
+		return
+	}
+	tp, err := s.store.GetTankProfile(ctx, tankID)
+	if err != nil || tp == nil {
+		return
+	}
+	count := lc.InitialCount + adj
+	if count < 0 {
+		count = 0
+	}
+	tp.FishCount = count
+	tp.BiomassKg = float64(count) * tp.AvgWeightG / 1000.0
+	_ = s.store.UpsertTankProfile(ctx, tp)
 }
 
 // ── POST /v1/tanks/{id}/transfer ─────────────────────────────────────────────
@@ -310,32 +342,52 @@ func (s *Server) handlePostTransfer(w http.ResponseWriter, r *http.Request, tank
 	}
 
 	// 도착 lineage 정보 — 수조내 이동(move/split/merge) 에만 해당. sale 은 외부로 나가므로 없음.
+	// 이미 입식된 수조로는 합치기(merge)만 가능: 받는 수조의 lot·입식을 유지하고 마릿수만 더한다.
+	// (예전엔 새 lineage 로 덮어써 받는 수조의 기존 lot·마릿수가 사라졌다.)
 	var toStockingID, toLotNo string
+	mergedIntoExisting := false
 	if !isSale {
-		toStockingID = common.NewID("stocking")
-		toLotNo = strings.TrimSpace(req.ToLotNo)
-		if toLotNo == "" {
-			toLotNo = "LOT-" + req.ToTankID + "-" + now.Format("20060102")
+		dstLC, err := s.store.GetTankLifecycle(r.Context(), req.ToTankID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
+			return
+		}
+		if dstLC != nil && dstLC.Status == "active" {
+			if req.TransferType != "merge" {
+				writeError(w, http.StatusConflict, "DEST_OCCUPIED",
+					"도착 수조에 이미 입식이 있습니다. 합치려면 transfer_type=merge 를 쓰세요.", "")
+				return
+			}
+			mergedIntoExisting = true
+			toStockingID = dstLC.ActiveStockingID
+			toLotNo = dstLC.LotNo
+		} else {
+			toStockingID = common.NewID("stocking")
+			toLotNo = strings.TrimSpace(req.ToLotNo)
+			if toLotNo == "" {
+				toLotNo = "LOT-" + req.ToTankID + "-" + now.Format("20060102")
+			}
 		}
 	}
 
 	payload := events.TankTransferRecordedPayload{
-		TransferID:      transferID,
-		TransferType:    req.TransferType,
-		FromTankID:      tankID,
-		FromStockingID:  src.ActiveStockingID,
-		FromLotNo:       src.LotNo,
-		ToTankID:        req.ToTankID,
-		ToStockingID:    toStockingID,
-		ToLotNo:         toLotNo,
-		DestinationName: strings.TrimSpace(req.DestinationName),
-		VehicleInfo:     strings.TrimSpace(req.VehicleInfo),
-		MovedCount:      req.MovedCount,
-		AvgWeightG:      avgWeight,
-		TotalBiomassKg:  req.TotalBiomassKg,
-		TransferredAt:   req.TransferredAt,
-		OperatorID:      req.OperatorID,
-		Notes:           req.Notes,
+		TransferID:         transferID,
+		TransferType:       req.TransferType,
+		FromTankID:         tankID,
+		FromStockingID:     src.ActiveStockingID,
+		FromLotNo:          src.LotNo,
+		ToTankID:           req.ToTankID,
+		ToStockingID:       toStockingID,
+		ToLotNo:            toLotNo,
+		MergedIntoExisting: mergedIntoExisting,
+		DestinationName:    strings.TrimSpace(req.DestinationName),
+		VehicleInfo:        strings.TrimSpace(req.VehicleInfo),
+		MovedCount:         req.MovedCount,
+		AvgWeightG:         avgWeight,
+		TotalBiomassKg:     req.TotalBiomassKg,
+		TransferredAt:      req.TransferredAt,
+		OperatorID:         req.OperatorID,
+		Notes:              req.Notes,
 	}
 	if err := payload.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "INVALID_PAYLOAD", err.Error(), "")
@@ -351,7 +403,10 @@ func (s *Server) handlePostTransfer(w http.ResponseWriter, r *http.Request, tank
 	}
 
 	// 도착 수조: 새 lineage (parent_lot_no 로 출발 lot 연결). 수조내 이동만.
-	if !isSale {
+	// 기존 입식에 합치기면 lineage 는 그대로 두고 마릿수만 다시 계산.
+	if mergedIntoExisting {
+		s.applyFishCountToProfile(r.Context(), req.ToTankID)
+	} else if !isSale {
 		transferredAt, _ := time.Parse(time.RFC3339Nano, req.TransferredAt)
 		dst := &storage.TankLifecycle{
 			TankID:            req.ToTankID,
@@ -371,6 +426,14 @@ func (s *Server) handlePostTransfer(w http.ResponseWriter, r *http.Request, tank
 			writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
 			return
 		}
+		// 도착 수조 급이 기준(마릿수·biomass)도 바로 반영 — 예전엔 재시작 전까지 0 이었다.
+		s.updateTankProfileFromStocking(r.Context(), req.ToTankID, src.Species, req.MovedCount,
+			avgWeight, float64(req.MovedCount)*avgWeight/1000.0)
+	}
+
+	// 분조: 출발 수조는 활성 유지 + 옮긴 만큼 마릿수 차감 (SumTankCountAdjustment 가 집계).
+	if req.TransferType == "split" {
+		s.applyFishCountToProfile(r.Context(), tankID)
 	}
 
 	// 출발 수조: 전량 이동(move)/병합(merge)/판매(sale) 이면 마감, 분할(split) 이면 활성 유지.

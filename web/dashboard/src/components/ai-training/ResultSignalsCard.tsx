@@ -1,6 +1,6 @@
 import type { VisionTrainingJob } from '../../lib/types';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 type Signal = 'green' | 'yellow' | 'red' | 'gray';
 

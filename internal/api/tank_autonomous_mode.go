@@ -90,12 +90,7 @@ func (s *Server) postTankAutonomousMode(w http.ResponseWriter, r *http.Request, 
 		req.OperatorID = "operator"
 	}
 
-	// off 외 전환은 reason 필수
-	if req.Mode != "off" && req.Reason == "" {
-		writeError(w, http.StatusUnprocessableEntity, "MISSING_REASON",
-			"reason is required for non-off mode transitions", "")
-		return
-	}
+	// reason 은 선택 — 있으면 감사 이력에 기록, 없어도 전환 적용.
 
 	// 현재 상태 조회
 	prev, err := s.store.GetTankAutonomousMode(r.Context(), tankID)
