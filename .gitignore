@@ -5,6 +5,10 @@
 # Local runtime state
 /var/
 
+# 로컬 라이브 config + 백업 (기기별 값 — edge.example.yaml / edge.example.yaml 만 커밋)
+/configs/edge.yaml
+/configs/*.bak*
+
 # Logs
 *.log
 
@@ -77,6 +81,10 @@ local-ai/llm-wiki/inbox/bluei-kb-staging/
 
 # 컴파일된 지식팩(게이팅 배포 아티팩트 — 커밋 금지, 별도 게이팅 허브로 발행)
 local-ai/llm-wiki/compiled/bluei-kb/
+
+# 어종 급이/GET 프로필 추출물 + 게이팅 배포 설정(독점 양식지식 — 공개 금지, 지식팩과 함께 발행)
+local-ai/llm-wiki/compiled/species-feeding-profiles.json
+local-ai/llm-wiki/compiled/species-feeding.json
 
 # Tauri 자동 생성 산물 (schemas 등)
 web/dashboard/src-tauri/gen/

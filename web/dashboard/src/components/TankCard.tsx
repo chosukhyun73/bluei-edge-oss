@@ -1,7 +1,7 @@
 import { Fish } from 'lucide-react';
 import type { Tank } from '../lib/types';
 import { Card, CardContent } from './ui/card';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 interface Props {
   tank: Tank;

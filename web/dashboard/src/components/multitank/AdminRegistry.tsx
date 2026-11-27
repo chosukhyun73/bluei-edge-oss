@@ -19,7 +19,7 @@ import {
   MEASUREMENT_TYPE_LABELS, DEVICE_CATEGORY_LABELS, CONTROL_METHOD_LABELS,
   POWER_TYPE_LABELS,
 } from '../../lib/types';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AdminRegistry — 운영자 도메인 등록 화면 (C-6a)

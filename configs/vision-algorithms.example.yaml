@@ -141,6 +141,46 @@ algorithms:
       bootstrap_min_frames: 0
       notes: "phase=baseline 영상 + pre_score 로 fine-tune. cycle 외 평소 안정성 평가."
 
+  # 펄스 세그먼트 2-head — docs/50. 탑뷰 급이 클립을 펄스 세그먼트로 잘라
+  # feeding(먹이반응)·activity(활동성) 2-head 채점. 평가 모달/② 탭 프리필의 AI 제안값.
+  # 활성 가중치 정본 = manifest (r2 2026-07-16 → r3 2026-07-18 promote, 3자 비교 근거).
+  # 학습 = local-ai/training/lrcn/train_segments.py (오프라인, 세그먼트 라벨 manifest).
+  - vision_algorithm_id: vision_lrcn_segments_2head_v1
+    display_name: LRCN 펄스 세그먼트 (탑뷰, 먹이반응 2-head)
+    status: candidate
+    species: atlantic_salmon
+    growth_stage: growout
+    size_range_g: [200, 5000]
+    density_range: medium
+    tank_shape: circle
+    tank_size_range_m: [4, 12]
+    camera_position: top_view
+    feeder_type: impact
+    source:
+      prototype: services/lrcn/model_2head.py
+      reference_commit: 0a4ffb9
+      legacy_origin: "블루오션 baseline 부분 전이 (backbone) + 2-head random init (docs/50 5단계)"
+    outputs:
+      - feeding_score
+      - activity_score
+    model:
+      runtime: pytorch_lrcn
+      feature_extractor: inceptionv3_imagenet_frozen
+      sequence_model: lstm_256_2head
+      # 학습·promote 가 백엔드 잡이 아닌 오프라인 파이프라인 — UI [학습 시작] 비활성 근거.
+      training_pipeline: offline_segments
+      # 표기용 초기값 — 실제 활성 가중치는 manifest 의 vision_lrcn_segments_2head_v1 슬롯이 정본.
+      weights_path: local-ai/training/runs/lrcn/segments_2head/best-r3-20260718.pt
+      training_phase: feeding
+      requires_operator_labels: true
+    validation:
+      # docs/50 세그먼트 채점 게이트 (운영자 실채점 세그먼트 수).
+      required_operator_label_count: 200
+      target_label_correlation: 0.6
+      bootstrap_min_boxes: 0
+      bootstrap_min_frames: 0
+      notes: "3자 비교 2026-07-18: r3 MAE 0.148/corr 0.67/3구간 84.9% (룰 0.289/0.21/72.8%). 중단판정 임계 재보정은 L2 전 필수."
+
 # Tank applications — 본선 4 수조에 동일 알고리즘 적용.
 tank_applications:
   - tank_id: tank_01

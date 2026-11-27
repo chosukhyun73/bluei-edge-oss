@@ -10,7 +10,7 @@ func (s *sqliteStore) GetTankSampling(ctx context.Context, tankID string) (*Tank
 	row := s.db.QueryRowContext(ctx,
 		`SELECT tank_id, latest_sampling_id, COALESCE(stocking_id,''),
 		        sampled_count, avg_weight_g,
-		        std_weight_g, min_weight_g, max_weight_g,
+		        std_weight_g, min_weight_g, max_weight_g, avg_length_cm,
 		        health_score, COALESCE(health_notes,''),
 		        abnormal_count,
 		        sampled_at, recorded_by, updated_at
@@ -23,10 +23,10 @@ func (s *sqliteStore) UpsertTankSampling(ctx context.Context, ts *TankSampling) 
 		`INSERT INTO current_tank_sampling(
 		   tank_id, latest_sampling_id, stocking_id,
 		   sampled_count, avg_weight_g,
-		   std_weight_g, min_weight_g, max_weight_g,
+		   std_weight_g, min_weight_g, max_weight_g, avg_length_cm,
 		   health_score, health_notes, abnormal_count,
 		   sampled_at, recorded_by, updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(tank_id) DO UPDATE SET
 		   latest_sampling_id=excluded.latest_sampling_id,
 		   stocking_id=excluded.stocking_id,
@@ -35,6 +35,7 @@ func (s *sqliteStore) UpsertTankSampling(ctx context.Context, ts *TankSampling) 
 		   std_weight_g=excluded.std_weight_g,
 		   min_weight_g=excluded.min_weight_g,
 		   max_weight_g=excluded.max_weight_g,
+		   avg_length_cm=excluded.avg_length_cm,
 		   health_score=excluded.health_score,
 		   health_notes=excluded.health_notes,
 		   abnormal_count=excluded.abnormal_count,
@@ -49,6 +50,7 @@ func (s *sqliteStore) UpsertTankSampling(ctx context.Context, ts *TankSampling) 
 		nullPtrFloat64(ts.StdWeightG),
 		nullPtrFloat64(ts.MinWeightG),
 		nullPtrFloat64(ts.MaxWeightG),
+		nullPtrFloat64(ts.AvgLengthCm),
 		nullPtrInt(ts.HealthScore),
 		ts.HealthNotes,
 		nullPtrInt(ts.AbnormalCount),
@@ -62,13 +64,13 @@ func (s *sqliteStore) UpsertTankSampling(ctx context.Context, ts *TankSampling) 
 // scanTankSampling — sql.Row (단건). 행 없으면 (nil, nil).
 func scanTankSampling(row *sql.Row) (*TankSampling, error) {
 	ts := &TankSampling{}
-	var stdW, minW, maxW sql.NullFloat64
+	var stdW, minW, maxW, avgLen sql.NullFloat64
 	var healthScore, abnormalCount sql.NullInt64
 	var sampledAt, updatedAt string
 	err := row.Scan(
 		&ts.TankID, &ts.LatestSamplingID, &ts.StockingID,
 		&ts.SampledCount, &ts.AvgWeightG,
-		&stdW, &minW, &maxW,
+		&stdW, &minW, &maxW, &avgLen,
 		&healthScore, &ts.HealthNotes,
 		&abnormalCount,
 		&sampledAt, &ts.RecordedBy, &updatedAt,
@@ -90,6 +92,10 @@ func scanTankSampling(row *sql.Row) (*TankSampling, error) {
 	if maxW.Valid {
 		v := maxW.Float64
 		ts.MaxWeightG = &v
+	}
+	if avgLen.Valid {
+		v := avgLen.Float64
+		ts.AvgLengthCm = &v
 	}
 	if healthScore.Valid {
 		v := int(healthScore.Int64)

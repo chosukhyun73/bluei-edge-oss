@@ -61,7 +61,7 @@ func newTestEnv(t *testing.T) (*runtime.App, storage.Store) {
 	migDir := filepath.Dir(migPath)
 	for _, name := range []string{
 		"001_init.sql", "002_autonomous_mode.sql", "003_lifecycle.sql",
-		"004_sampling.sql", "005_fcr_calibration.sql", "006_decision_policy.sql",
+		"004_sampling.sql", "041_sampling_length.sql", "005_fcr_calibration.sql", "006_decision_policy.sql",
 		"007_weight_history.sql", "008_groups.sql",
 		"009_farms_sites.sql", "010_water_treatment_groups.sql", "011_controllers.sql",
 		"012_actuators_sensors.sql", "013_species_profiles.sql",

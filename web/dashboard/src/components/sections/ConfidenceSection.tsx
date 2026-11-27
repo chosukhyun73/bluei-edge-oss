@@ -1,5 +1,5 @@
 import type { StateVector } from '../../lib/types';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 import { Badge } from '../ui/badge';
 
 type Props = { data?: StateVector['confidence'] };

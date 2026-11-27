@@ -172,6 +172,7 @@ type tankStockingParams struct {
 	LotNo                 string
 	StockedAt             string
 	OperatorID            string
+	ImportedFrom          string // "platform" = 앱 입식 이어받기
 }
 
 // createTankStocking — 수조 입식 코어(이벤트+lifecycle+모드off+profile). 활성 lineage 면 conflict=true.
@@ -224,6 +225,7 @@ func (s *Server) createTankStocking(ctx context.Context, tankID string, p tankSt
 		SupplierID:            p.SupplierID,
 		StockedAt:             p.StockedAt,
 		OperatorID:            p.OperatorID,
+		ImportedFrom:          p.ImportedFrom,
 	}
 	if err := payload.Validate(); err != nil {
 		return "", "", false, err

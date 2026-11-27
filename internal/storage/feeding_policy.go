@@ -17,18 +17,27 @@ import (
 
 // FeedingPolicy is the resolved effective policy used by AI worker / Mode Arbiter.
 type FeedingPolicy struct {
-	BsfMode        string // "aggressive" | "standard" | "conservative"
-	OperatingMode  string // "auto" | "manual"
-	MaxDailyCycles int
-	Source         string // "tank_override" | "group_default" | "system_default"
+	BsfMode             string // "aggressive" | "standard" | "conservative"
+	OperatingMode       string // "auto" | "manual"
+	MaxDailyCycles      int
+	DailyCycles         int // 일 사이클 수 직접 지정 (0 = 자동: 1일량÷1회최대량 산출). 2026-07-07 운영자 요구.
+	PhotoperiodStartMin int // 점등 시작 (자정 기준 분). 급이는 이 창 안에서만.
+	PhotoperiodEndMin   int // 소등 (자정 기준 분).
+	// onoff_feeder 마이크로펄스 운영값 — 대시보드(급이 스케줄 카드) 입력. 0 = 미설정(config/기본값 fallback).
+	FeederRunSec    int    // 펄스 1회 공급(초)
+	FeederStopSec   int    // 펄스 사이 정지(초)
+	FeederSpinupSec int    // 공급모터 리드타임(초) — 살포모터 기동 후 공급 체결까지
+	Source          string // "tank_override" | "group_default" | "system_default"
 }
 
 // System default — group/tank 모두 정책 미지정 시 fallback.
 var systemDefaultFeedingPolicy = FeedingPolicy{
-	BsfMode:        "standard",
-	OperatingMode:  "auto",
-	MaxDailyCycles: 4,
-	Source:         "system_default",
+	BsfMode:             "standard",
+	OperatingMode:       "auto",
+	MaxDailyCycles:      4,
+	PhotoperiodStartMin: 9 * 60,  // 09:00
+	PhotoperiodEndMin:   17 * 60, // 17:00
+	Source:              "system_default",
 }
 
 // GetEffectiveFeedingPolicy resolves the effective policy for a tank.
@@ -72,6 +81,30 @@ func (s *sqliteStore) GetEffectiveFeedingPolicy(ctx context.Context, tankID stri
 					policy.MaxDailyCycles = n
 					groupContributed = true
 				}
+				if n, ok := numericInt(fp["daily_cycles"]); ok && n > 0 {
+					policy.DailyCycles = n
+					groupContributed = true
+				}
+				if n, ok := numericInt(fp["photoperiod_start_min"]); ok {
+					policy.PhotoperiodStartMin = n
+					groupContributed = true
+				}
+				if n, ok := numericInt(fp["photoperiod_end_min"]); ok {
+					policy.PhotoperiodEndMin = n
+					groupContributed = true
+				}
+				if n, ok := numericInt(fp["feeder_run_sec"]); ok && n > 0 {
+					policy.FeederRunSec = n
+					groupContributed = true
+				}
+				if n, ok := numericInt(fp["feeder_stop_sec"]); ok && n > 0 {
+					policy.FeederStopSec = n
+					groupContributed = true
+				}
+				if n, ok := numericInt(fp["feeder_spinup_sec"]); ok && n > 0 {
+					policy.FeederSpinupSec = n
+					groupContributed = true
+				}
 			}
 		}
 	}
@@ -92,6 +125,30 @@ func (s *sqliteStore) GetEffectiveFeedingPolicy(ctx context.Context, tankID stri
 		}
 		if n, ok := numericInt(fp["max_daily_cycles"]); ok && n > 0 {
 			policy.MaxDailyCycles = n
+			tankContributed = true
+		}
+		if n, ok := numericInt(fp["daily_cycles"]); ok && n > 0 {
+			policy.DailyCycles = n
+			tankContributed = true
+		}
+		if n, ok := numericInt(fp["photoperiod_start_min"]); ok {
+			policy.PhotoperiodStartMin = n
+			tankContributed = true
+		}
+		if n, ok := numericInt(fp["photoperiod_end_min"]); ok {
+			policy.PhotoperiodEndMin = n
+			tankContributed = true
+		}
+		if n, ok := numericInt(fp["feeder_run_sec"]); ok && n > 0 {
+			policy.FeederRunSec = n
+			tankContributed = true
+		}
+		if n, ok := numericInt(fp["feeder_stop_sec"]); ok && n > 0 {
+			policy.FeederStopSec = n
+			tankContributed = true
+		}
+		if n, ok := numericInt(fp["feeder_spinup_sec"]); ok && n > 0 {
+			policy.FeederSpinupSec = n
 			tankContributed = true
 		}
 	}

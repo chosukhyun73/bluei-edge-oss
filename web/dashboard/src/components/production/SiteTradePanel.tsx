@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { dateLocale } from '../../lib/format';
 import {
   Plus, ChevronDown, ChevronRight, Fish, PackageCheck, Users, Paperclip,
 } from 'lucide-react';
@@ -10,7 +11,7 @@ import type {
 } from '../../lib/types';
 import { Field, SelectField } from '../sections/TankSettingsSection';
 import { Button } from '../ui/button';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SiteTradePanel — 사이트(사업자) 단위 입식·출하·거래처 관리
@@ -391,7 +392,7 @@ function StockingBatchForm({
         species: species.trim(),
         growth_stage: growthStage,
         batch_lot_no: batchLotNo.trim() || undefined,
-        stocked_at: stockedAt || undefined,
+        stocked_at: stockedAt ? new Date(stockedAt).toISOString() : undefined,
         allocations,
       });
       setCreatedId(r.site_stocking_id);
@@ -603,7 +604,7 @@ function HarvestBatchForm({
         site_id: siteId,
         buyer_id: buyerId || undefined,
         vehicle_info: vehicleInfo.trim() || undefined,
-        harvested_at: harvestedAt || undefined,
+        harvested_at: harvestedAt ? new Date(harvestedAt).toISOString() : undefined,
         lines,
       });
       setCreatedId(r.site_harvest_id);
@@ -812,7 +813,7 @@ function TradeHistory({
                 <span className="font-medium text-white">{s.species}</span>
                 <span className="px-1 py-0.5 rounded text-[10px] bg-green-500/20 text-green-300 border border-green-500/30">{s.growth_stage}</span>
                 <span className="text-gray-400">{s.supplier_name ?? tr('siteTrade.noSupplier')}</span>
-                <span className="text-gray-500 ml-auto">{new Date(s.stocked_at).toLocaleDateString('ko-KR')}</span>
+                <span className="text-gray-500 ml-auto">{new Date(s.stocked_at).toLocaleDateString(dateLocale())}</span>
               </div>
               <div className="text-gray-400">{tr('siteTrade.totalCount', { count: s.total_count.toLocaleString() })}
                 {s.batch_lot_no && ` · lot ${s.batch_lot_no}`}
@@ -850,7 +851,7 @@ function TradeHistory({
             <div key={h.site_harvest_id} className="p-2.5 border border-teal-500/20 rounded bg-gray-800/30 text-xs space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium text-white">{h.buyer_name ?? tr('siteTrade.noBuyer')}</span>
-                <span className="text-gray-500 ml-auto">{new Date(h.harvested_at).toLocaleDateString('ko-KR')}</span>
+                <span className="text-gray-500 ml-auto">{new Date(h.harvested_at).toLocaleDateString(dateLocale())}</span>
               </div>
               <div className="text-gray-400">{tr('siteTrade.totalCount', { count: h.total_count.toLocaleString() })}
                 {h.vehicle_info && ` · ${tr('siteTrade.vehiclePrefix')}${h.vehicle_info}`}

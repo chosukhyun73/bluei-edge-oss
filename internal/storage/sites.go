@@ -9,6 +9,16 @@ import (
 
 // UpsertSiteLand inserts or updates a land site row.
 func (s *sqliteStore) UpsertSiteLand(ctx context.Context, sl *site.SiteLand) error {
+	return s.upsertAddressSite(ctx, sl, site.TypeLand)
+}
+
+// UpsertSiteProcessing inserts or updates a processing-plant site row. A plant
+// has the same shape as a land site (address + optional coordinates).
+func (s *sqliteStore) UpsertSiteProcessing(ctx context.Context, sl *site.SiteLand) error {
+	return s.upsertAddressSite(ctx, sl, site.TypeProcessing)
+}
+
+func (s *sqliteStore) upsertAddressSite(ctx context.Context, sl *site.SiteLand, siteType site.SiteType) error {
 	metaJSON, err := json.Marshal(sl.Metadata)
 	if err != nil {
 		return err
@@ -33,7 +43,7 @@ func (s *sqliteStore) UpsertSiteLand(ctx context.Context, sl *site.SiteLand) err
            updated_at=excluded.updated_at`,
 		sl.SiteID,
 		sl.FarmID,
-		string(site.TypeLand),
+		string(siteType),
 		sl.Name,
 		sl.Timezone,
 		nullStr(sl.Location.Address),

@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { useLanguage } from '../../lib/language-context';
+import { useEffect, useState } from 'react';
+import { useLanguage } from '../../lib/language-core';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
 import { OperatingPolicy } from './OperatingPolicy';
 import { InferenceMonitor } from './InferenceMonitor';
 import { FeedCycleMonitor } from './FeedCycleMonitor';
+import { HopperCard } from './HopperCard';
 import { LearnedSafetyPanel } from './LearnedSafetyPanel';
 import { ModelRegistry } from './ModelRegistry';
 import { LearningDataCollector } from './LearningDataCollector';
@@ -33,9 +34,24 @@ type SubTab =
   | 'controllers'
   | 'admin';
 
+const SUB_TABS: SubTab[] = [
+  'policy', 'inference', 'feed', 'safety-learning', 'models',
+  'learning-data', 'ai-training', 'controllers', 'admin',
+];
+
 export function MultiTankOperations() {
   const { tr } = useLanguage();
   const [subTab, setSubTab] = useState<SubTab>('policy');
+
+  // 다른 sub-tab 에서의 이동 요청 (예: 운영 정책 → "사료공급 탭에서 변경" 링크).
+  useEffect(() => {
+    const onGoto = (ev: Event) => {
+      const target = (ev as CustomEvent).detail;
+      if (SUB_TABS.includes(target as SubTab)) setSubTab(target as SubTab);
+    };
+    window.addEventListener('bluei:goto-subtab', onGoto);
+    return () => window.removeEventListener('bluei:goto-subtab', onGoto);
+  }, []);
 
   return (
     <Tabs value={subTab} onValueChange={v => setSubTab(v as SubTab)}>
@@ -59,7 +75,8 @@ export function MultiTankOperations() {
         <InferenceMonitor />
       </TabsContent>
 
-      <TabsContent value="feed" className="pt-4">
+      <TabsContent value="feed" className="pt-4 space-y-4">
+        <HopperCard />
         <FeedCycleMonitor />
       </TabsContent>
 

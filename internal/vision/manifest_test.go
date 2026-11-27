@@ -43,7 +43,7 @@ func TestPromoteAndRollback(t *testing.T) {
 	w2 := makeWeights(t, filepath.Join(tmp, "runs/job2/best.pt"))
 
 	// 1) 첫 promote → 활성 weights 설정, history 비어있음
-	st, err := vision.Promote("algo_a", w1, "job1", "op1")
+	st, err := vision.Promote("algo_a", w1, "job1", "op1", "note1")
 	if err != nil {
 		t.Fatalf("first promote: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestPromoteAndRollback(t *testing.T) {
 	}
 
 	// 2) 두 번째 promote → 이전 것은 history 로
-	st, err = vision.Promote("algo_a", w2, "job2", "op2")
+	st, err = vision.Promote("algo_a", w2, "job2", "op2", "note2")
 	if err != nil {
 		t.Fatalf("second promote: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestPromoteRejectsMissingWeights(t *testing.T) {
 	tmp := t.TempDir()
 	withChdir(t, tmp)
 
-	if _, err := vision.Promote("algo_a", filepath.Join(tmp, "nope.pt"), "j", "op"); err == nil {
+	if _, err := vision.Promote("algo_a", filepath.Join(tmp, "nope.pt"), "j", "op", ""); err == nil {
 		t.Fatalf("expected error for missing weights file")
 	}
 }

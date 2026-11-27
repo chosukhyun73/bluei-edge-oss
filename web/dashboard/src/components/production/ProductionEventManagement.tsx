@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
 import { ProductionEventLog } from './ProductionEventLog';
 import { InventoryCategoryPanel } from './InventoryCategoryPanel';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ProductionEventManagement — 생산·이벤트 기록 탭의 4 서브탭 래퍼

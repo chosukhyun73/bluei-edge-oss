@@ -1,0 +1,11 @@
+id: kr_haccp_export
+name: 한국 수출용 수산물 HACCP (해수부)
+version: 해수부 고시 제2023-31호
+checked_at: "2026-11-17"
+min_retention_years: 2
+items:
+  - {id: plan, title: HACCP 관리계획을 게시했다, required: true, check: plan_published}
+  - {id: review, title: 기록을 1주일 안에 검토·서명할 계정이 있다, required: true, check: reviewer_account}
+  - {id: paper, title: 서명란이 있는 출력본을 보관한다, required: true, check: manual, note: 고시에 전자기록 문구가 없다. 수품원 확인 전까지 출력본을 함께 둔다}
+  - {id: monitoring, title: CCP 모니터링·이탈·개선조치 기록, required: true, check: later}
+  - {id: reassess, title: 계획을 연 1회 이상 재평가한다, required: true, check: later}

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, X, Trash2 } from 'lucide-react';
 import type { SpawnBatch, NewSpawnBatchBody, BroodstockCohort, Tank } from '../lib/types';
 import { SpawnBatches, Broodstock, Groups, ApiError } from '../lib/api';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 import { ConfirmDialog } from './ui/confirm-dialog';
 
 // QR 발행·표시는 GX10 아닌 Flutter 앱(landBased)에서 수행(2026-06-15 방향). GX10은

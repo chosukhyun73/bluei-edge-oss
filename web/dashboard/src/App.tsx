@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Groups } from './lib/api';
 import type { Group, Tank } from './lib/types';
 import { Header } from './components/Header';
@@ -13,13 +13,15 @@ import { FarmSiteHeader } from './components/FarmSiteHeader';
 import { CycleCompletionDispute } from './components/multitank/CycleCompletionDispute';
 import { useCycleCompletionDispute } from './components/multitank/useCycleCompletionDispute';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { EmergencyFeedStop } from './components/EmergencyFeedStop';
 import { ProductionEventManagement } from './components/production/ProductionEventManagement';
 import { SiteTradePanel } from './components/production/SiteTradePanel';
-import { useLanguage } from './lib/language-context';
+import { LongTermEnvPanel } from './components/LongTermEnvPanel';
+import { useLanguage } from './lib/language-core';
 
 export default function App() {
   const { tr } = useLanguage();
-  const [topTab, setTopTab] = useState<'legacy' | 'multitank' | 'events' | 'sitetrade'>('legacy');
+  const [topTab, setTopTab] = useState<'legacy' | 'multitank' | 'events' | 'sitetrade' | 'longenv'>('legacy');
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupTanks, setGroupTanks] = useState<Tank[]>([]);
@@ -27,10 +29,10 @@ export default function App() {
   const [selectedTankId, setSelectedTankId] = useState<string | null>(null);
   const [groupsError, setGroupsError] = useState<string | null>(null);
 
-  // 앱 시작 시 그룹 목록 로드
-  useEffect(() => {
+  // 그룹 목록 refetch (선택/포커스와 무관하게 최신화).
+  const reloadGroups = useCallback(() => {
     Groups.list()
-      .then(r => setGroups(r.items))
+      .then(r => { setGroups(r.items); setGroupsError(null); })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : 'unknown error';
         setGroupsError(msg);
@@ -38,7 +40,17 @@ export default function App() {
       });
   }, []);
 
-  // 그룹 선택 시 해당 Cage/Tank 목록 로드 + TankDetail 초기화
+  // 선택된 그룹의 Cage/Tank 목록 refetch (선택 상태는 건드리지 않음 — 폴링용).
+  const reloadTanks = useCallback(() => {
+    if (!selectedGroupId) { setGroupTanks([]); return; }
+    Groups.tanks(selectedGroupId)
+      .then(r => setGroupTanks(r.items))
+      .catch((err: unknown) => {
+        console.error('[bluei-edge] tanks fetch failed:', err);
+      });
+  }, [selectedGroupId]);
+
+  // 그룹 선택 변경 시에만: 선택된 tank 초기화 + 목록 로드.
   useEffect(() => {
     if (!selectedGroupId) {
       setGroupTanks([]);
@@ -46,13 +58,29 @@ export default function App() {
       return;
     }
     setSelectedTankId(null);
-    Groups.tanks(selectedGroupId)
-      .then(r => setGroupTanks(r.items))
-      .catch((err: unknown) => {
-        console.error('[bluei-edge] tanks fetch failed:', err);
-        setGroupTanks([]);
-      });
-  }, [selectedGroupId]);
+    reloadTanks();
+  }, [selectedGroupId, reloadTanks]);
+
+  // 근본 픽스 — 구조 목록(그룹/수조)을 자동 최신화: 15초 폴링 + 창 포커스/가시성 복귀 시 refetch.
+  // 센서데이터처럼 목록도 상시 최신 유지 → 같은뷰/다른탭/외부 어디서 삭제·추가되든 stale 없이
+  // 자동 반영(브라우저 재로드·GX10 재시작 불필요).
+  useEffect(() => {
+    reloadGroups();
+    const refresh = () => {
+      if (document.visibilityState === 'visible') {
+        reloadGroups();
+        reloadTanks();
+      }
+    };
+    const id = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [reloadGroups, reloadTanks]);
 
   const selectedGroup = groups.find(g => g.group_id === selectedGroupId) ?? null;
   const selectedTank = groupTanks.find(t => t.tank_id === selectedTankId) ?? null;
@@ -64,7 +92,7 @@ export default function App() {
     <div className="min-h-screen bg-background">
       <Header />
 
-      <main className="max-w-[1920px] mx-auto px-6 py-6">
+      <main className="max-w-[1920px] 3xl:max-w-[3200px] mx-auto px-6 py-6">
         {/* 농장(Farm) → 사이트(Site) — 전역 식별 정보. 사용자가 직접 등록. */}
         <section className="mb-8">
           <FarmSiteHeader />
@@ -77,6 +105,7 @@ export default function App() {
             <TabsTrigger value="multitank">{tr('nav.aiManagement')}</TabsTrigger>
             <TabsTrigger value="events">{tr('nav.production')}</TabsTrigger>
             <TabsTrigger value="sitetrade">{tr('nav.trade')}</TabsTrigger>
+            <TabsTrigger value="longenv">{tr('nav.longEnv')}</TabsTrigger>
           </TabsList>
 
           {/* ── 레거시 그룹 보기 ── */}
@@ -87,26 +116,20 @@ export default function App() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-4 3xl:grid-cols-[minmax(0,1fr)_minmax(0,9fr)] gap-6">
               {/* 사이드바 — Group 선택 */}
               <div className="lg:col-span-1">
                 <GroupSelector
                   groups={groups}
                   selectedGroupId={selectedGroupId}
                   onSelectGroup={setSelectedGroupId}
-                  onGroupCreated={() => {
-                    // 신규 그룹 등록 후 전체 목록 refetch — 자동 선택은 GroupSelector 내부에서.
-                    void Groups.list().then(r => setGroups(r.items)).catch(() => undefined);
-                  }}
-                  onGroupDeleted={() => {
-                    // 삭제 후 목록 refetch. 선택 해제는 GroupSelector 가 직접 호출.
-                    void Groups.list().then(r => setGroups(r.items)).catch(() => undefined);
-                  }}
+                  onGroupCreated={reloadGroups}
+                  onGroupDeleted={reloadGroups}
                 />
               </div>
 
               {/* 메인 패널 */}
-              <div className="lg:col-span-3">
+              <div className="lg:col-span-3 3xl:col-span-1">
                 <ErrorBoundary fallbackTitle={tr('error.panel')}>
                 {selectedTank ? (
                   <TankDetail
@@ -120,14 +143,7 @@ export default function App() {
                     group={selectedGroup}
                     tanks={groupTanks}
                     onSelectTank={setSelectedTankId}
-                    onTanksChanged={() => {
-                      // 그룹 내 수조 추가/삭제 후 재조회.
-                      if (selectedGroupId) {
-                        void Groups.tanks(selectedGroupId)
-                          .then(r => setGroupTanks(r.items))
-                          .catch(() => undefined);
-                      }
-                    }}
+                    onTanksChanged={reloadTanks}
                   />
                 ) : (
                   <ProductionOverview />
@@ -155,10 +171,20 @@ export default function App() {
               <SiteTradePanel />
             </ErrorBoundary>
           </TabsContent>
+
+          {/* ── 해상 장기 환경 (최대 2년) ── */}
+          <TabsContent value="longenv" className="pt-5">
+            <ErrorBoundary fallbackTitle={tr('error.panel')}>
+              <LongTermEnvPanel />
+            </ErrorBoundary>
+          </TabsContent>
         </Tabs>
       </main>
 
       <Footer />
+
+      {/* 화면 하단 고정 급이 비상 정지 — 모든 feeder 즉시 stop (사이클·방치 run 무관) */}
+      <EmergencyFeedStop />
 
       {/* G-4: 전역 cycle 종료 dispute auto-modal — 어느 탭에 있든 cycle 종료 시 자동 표시 */}
       <CycleCompletionDispute
@@ -166,6 +192,11 @@ export default function App() {
         observation={cycleCompletion?.observation ?? null}
         cycleId={cycleCompletion?.cycle.cycle_id ?? ''}
         tankId={cycleCompletion?.cycle.tank_id ?? ''}
+        startedAt={cycleCompletion?.cycle.started_at ?? ''}
+        ordinal={cycleCompletion?.ordinal ?? null}
+        pulsesExecuted={cycleCompletion?.cycle.pulses_executed ?? null}
+        suspectedNoDischarge={cycleCompletion?.cycle.suspected_no_discharge ?? null}
+        pulseVerdicts={cycleCompletion?.cycle.pulse_verdicts ?? []}
         onClose={dismissCycleCompletion}
       />
     </div>

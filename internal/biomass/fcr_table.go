@@ -11,24 +11,28 @@ type FCRKey struct {
 // expectedFCRTable — 어종/단계별 표준 FCR (한국 양식 + FishBase 기반 baseline).
 // D-4 의 calibrator 가 이 값을 Cage/Tank별로 보정한다.
 var expectedFCRTable = map[FCRKey]float64{
-	{Species: "참돔", GrowthStage: "juvenile"}:   1.4,
-	{Species: "참돔", GrowthStage: "growout"}:    1.6,
-	{Species: "연어", GrowthStage: "juvenile"}:   1.0,
-	{Species: "연어", GrowthStage: "growout"}:    1.2,
-	{Species: "광어", GrowthStage: "juvenile"}:   1.6,
-	{Species: "광어", GrowthStage: "growout"}:    1.8,
-	{Species: "넙치", GrowthStage: "juvenile"}:   1.6, // 광어 별칭
-	{Species: "넙치", GrowthStage: "growout"}:    1.8,
-	{Species: "우럭", GrowthStage: "juvenile"}:   1.5,
-	{Species: "우럭", GrowthStage: "growout"}:    1.7,
-	{Species: "조피볼락", GrowthStage: "juvenile"}: 1.5,
-	{Species: "조피볼락", GrowthStage: "growout"}:  1.7,
-	{Species: "농어", GrowthStage: "juvenile"}:   1.5,
-	{Species: "농어", GrowthStage: "growout"}:    1.7,
-	{Species: "방어", GrowthStage: "juvenile"}:   1.5,
-	{Species: "방어", GrowthStage: "growout"}:    1.7,
-	{Species: "감성돔", GrowthStage: "juvenile"}:  1.4,
-	{Species: "감성돔", GrowthStage: "growout"}:   1.6,
+	// 운영종 — 실제 lifecycle/profile 의 species 값은 슬러그(atlantic_salmon 등)로 저장된다.
+	// 한글 키만 있으면 룩업 미스 → default 1.5 폴백(성장 과소반영). vault fcr_base=1.2 정본.
+	{Species: "atlantic_salmon", GrowthStage: "juvenile"}: 1.0,
+	{Species: "atlantic_salmon", GrowthStage: "growout"}:  1.2,
+	{Species: "참돔", GrowthStage: "juvenile"}:              1.4,
+	{Species: "참돔", GrowthStage: "growout"}:               1.6,
+	{Species: "연어", GrowthStage: "juvenile"}:              1.0,
+	{Species: "연어", GrowthStage: "growout"}:               1.2,
+	{Species: "광어", GrowthStage: "juvenile"}:              1.6,
+	{Species: "광어", GrowthStage: "growout"}:               1.8,
+	{Species: "넙치", GrowthStage: "juvenile"}:              1.6, // 광어 별칭
+	{Species: "넙치", GrowthStage: "growout"}:               1.8,
+	{Species: "우럭", GrowthStage: "juvenile"}:              1.5,
+	{Species: "우럭", GrowthStage: "growout"}:               1.7,
+	{Species: "조피볼락", GrowthStage: "juvenile"}:            1.5,
+	{Species: "조피볼락", GrowthStage: "growout"}:             1.7,
+	{Species: "농어", GrowthStage: "juvenile"}:              1.5,
+	{Species: "농어", GrowthStage: "growout"}:               1.7,
+	{Species: "방어", GrowthStage: "juvenile"}:              1.5,
+	{Species: "방어", GrowthStage: "growout"}:               1.7,
+	{Species: "감성돔", GrowthStage: "juvenile"}:             1.4,
+	{Species: "감성돔", GrowthStage: "growout"}:              1.6,
 }
 
 // DefaultFCR — 룩업 미스 시 폴백.

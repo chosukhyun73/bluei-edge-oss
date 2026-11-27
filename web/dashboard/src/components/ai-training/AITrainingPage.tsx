@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 import { Vision } from '../../lib/api';
 import type { VisionTrainingStatus, VisionAlgorithm } from '../../lib/types';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
@@ -7,6 +7,7 @@ import { Skeleton } from '../ui/skeleton';
 import { StatusSection } from './StatusSection';
 import { BootstrapTab } from './BootstrapTab';
 import { DisputeTab } from './DisputeTab';
+import { FloorTab } from './FloorTab';
 import { TrainingControlCard } from './TrainingControlCard';
 import { ResultSignalsCard } from './ResultSignalsCard';
 import { PromoteCard } from './PromoteCard';
@@ -14,6 +15,7 @@ import { TankBaselineCard } from './TankBaselineCard';
 import { TankForecastCard } from './TankForecastCard';
 import { SafetyInfoCard } from './SafetyInfoCard';
 import { DiskUsageCard } from './DiskUsageCard';
+import { CaptureControlCard } from './CaptureControlCard';
 
 const POLL_INTERVAL_MS = 4000; // 5/9 원본과 동일
 
@@ -27,7 +29,7 @@ export function AITrainingPage() {
   const { tr } = useLanguage();
   const [status, setStatus] = useState<VisionTrainingStatus | null>(null);
   const [algorithm, setAlgorithm] = useState<VisionAlgorithm | null>(null);
-  const [activeTab, setActiveTab] = useState<'bootstrap' | 'dispute'>('bootstrap');
+  const [activeTab, setActiveTab] = useState<'bootstrap' | 'dispute' | 'floor'>('bootstrap');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,6 +117,17 @@ export function AITrainingPage() {
             >
               {tr('aiTrainingPage.tabDispute')}
             </button>
+            <button
+              onClick={() => setActiveTab('floor')}
+              className={
+                'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ' +
+                (activeTab === 'floor'
+                  ? 'border-green-400 text-green-300'
+                  : 'border-transparent text-gray-400 hover:text-gray-200')
+              }
+            >
+              {tr('aiTrainingPage.tabFloor')}
+            </button>
           </div>
           {activeTab === 'bootstrap' && (
             <BootstrapTab status={status} onSaved={refreshAIState} />
@@ -122,6 +135,7 @@ export function AITrainingPage() {
           {activeTab === 'dispute' && (
             <DisputeTab status={status} onSubmitted={refreshAIState} />
           )}
+          {activeTab === 'floor' && <FloorTab />}
         </CardContent>
       </Card>
 
@@ -146,6 +160,9 @@ export function AITrainingPage() {
 
       {/* Cage/Tank 단기 수질 예측 학습 */}
       <TankForecastCard status={status} onChanged={refreshAIState} />
+
+      {/* 학습 영상 수집 시작/중지 */}
+      <CaptureControlCard />
 
       {/* R16 — 디스크 사용량 위젯 */}
       <DiskUsageCard />

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"bluei.kr/edge/internal/events"
+	"bluei.kr/edge/internal/feed_cycle"
 	"bluei.kr/edge/internal/knowledge"
 	"bluei.kr/edge/internal/llm"
 )
@@ -91,6 +92,14 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 			pre.WriteString(contextKo)
 			pre.WriteString("\n\n")
 		}
+		// 도구 사용 지침 — 모델이 fact pack 기억만으로 추측 답변하는 것을 막는다.
+		// 2026-07-28: "사료 보충은 어디에 기록하나" 질문에 도구를 안 쓰고 답해 화면 위치를
+		// 틀리게 안내했다. 사용법·수치 질문은 반드시 도구로 확인하게 한다.
+		pre.WriteString("[도구 사용 지침]\n" +
+			"- 시스템 사용법·화면 위치·급이 동작 원리·용어·문제 해결 질문이면 **먼저 search_guide 도구**로 가이드북을 확인하고, 그 내용대로 답한다.\n" +
+			"- 가이드북 내용이 당신의 기억과 다르면 **가이드북이 옳다**. 기억으로 화면 위치를 추측하지 않는다.\n" +
+			"- 잔량·급이량·판정 건수 같은 수치는 추측하지 말고 해당 도구로 조회한다.\n" +
+			"- 도구로도 확인되지 않으면 \"확인이 필요합니다\"라고 답한다.\n\n")
 		injected[li].Content = pre.String() + "운영자 질문: " + injected[li].Content
 		msgs = injected
 	}
@@ -109,13 +118,36 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	_, err := s.llmClient.ChatStream(ctx, s.cfg.LLM.AssistantModel, s.cfg.LLM.AssistantKeepAlive, msgs,
-		func(delta string) {
-			sendSSE(w, flusher, map[string]any{"delta": delta})
-		})
-	if err != nil {
-		sendSSE(w, flusher, map[string]any{"error": "어시스턴트 호출 실패: " + err.Error()})
-		return
+	// 도구 루프 — 모델이 데이터를 직접 조회하고(읽기 전용), 그 결과로 답한다.
+	// 도구 호출이 없으면 1회차 스트리밍이 그대로 최종 답변이 된다(기존 동작과 동일).
+	tools := assistantToolDefs()
+	for round := 0; ; round++ {
+		content, calls, err := s.llmClient.ChatStreamTools(ctx, s.cfg.LLM.AssistantModel,
+			s.cfg.LLM.AssistantKeepAlive, msgs, tools,
+			func(delta string) {
+				sendSSE(w, flusher, map[string]any{"delta": delta})
+			})
+		if err != nil {
+			sendSSE(w, flusher, map[string]any{"error": "어시스턴트 호출 실패: " + err.Error()})
+			return
+		}
+		if len(calls) == 0 {
+			break
+		}
+		// 상한 도달 — 더 조회하지 않고 지금까지의 자료로 답하게 한다.
+		if round >= assistantMaxToolRounds-1 {
+			tools = nil
+		}
+
+		msgs = append(msgs, llm.ChatTurn{Role: "assistant", Content: content, ToolCalls: calls})
+		for _, call := range calls {
+			name := call.Function.Name
+			sendSSE(w, flusher, map[string]any{"tool": name})
+			result := s.execAssistantTool(r, name, call.Function.Arguments)
+			slog.Info("assistant tool executed", "tool", name, "args", call.Function.Arguments,
+				"result_bytes", len(result))
+			msgs = append(msgs, llm.ChatTurn{Role: "tool", ToolName: name, Content: result})
+		}
 	}
 	sendSSE(w, flusher, map[string]any{"done": true})
 }
@@ -251,6 +283,13 @@ func (s *Server) assistantTankLine(r *http.Request, tankID, fallbackSpecies stri
 	}
 
 	line := fmt.Sprintf("  - %s: %s | 장비 %s | 오늘 급이 %.0fg", head, water, equip, v.Feeding.TodayTotalG)
+	// 호퍼 잔량 — 운영자가 자주 묻는 항목인데 컨텍스트에 없어 어시스턴트가 답하지 못했다(2026-07-28).
+	if est, err := feed_cycle.EstimateHopper(r.Context(), s.store, tankID); err == nil && est != nil && est.RemainingG != nil {
+		line += fmt.Sprintf(" | 호퍼 잔량(추정) %.0fg", *est.RemainingG)
+		if est.Low {
+			line += "(부족)"
+		}
+	}
 	if v.Anomaly.LatestVerdict != "" && v.Anomaly.LatestVerdict != "normal" {
 		line += " | 이상감지 " + v.Anomaly.LatestVerdict
 	}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { dateLocale } from '../../lib/format';
 import { Trash2 } from 'lucide-react';
 import type { Controller, ControllerStatus, ControllerTestResult, Tank } from '../../lib/types';
 import { Controllers, Tanks, Provision } from '../../lib/api';
@@ -7,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Skeleton } from '../ui/skeleton';
 import { ConfirmDialog } from '../ui/confirm-dialog';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -559,6 +560,20 @@ export function ControllerRegistry() {
     }
   }
 
+  // onoff 급이기 운전/정지 (feeder control). ⚠ 실제 급이기 작동 — run 시 확인.
+  async function handleFeed(id: string, action: 'run' | 'stop') {
+    if (action === 'run' && !window.confirm(tr('controllerRegistry.feedRunConfirm', { id }))) return;
+    setActionBusy(prev => ({ ...prev, [id]: true }));
+    setTestError(null);
+    try {
+      await Controllers.feed(id, action, true);
+    } catch (err: unknown) {
+      setTestError(err instanceof Error ? err.message : tr('controllerRegistry.feedError'));
+    } finally {
+      setActionBusy(prev => ({ ...prev, [id]: false }));
+    }
+  }
+
   async function handleDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -702,7 +717,7 @@ export function ControllerRegistry() {
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">
                         {ctrl.last_seen_at
-                          ? new Date(ctrl.last_seen_at).toLocaleString('ko-KR')
+                          ? new Date(ctrl.last_seen_at).toLocaleString(dateLocale())
                           : '—'}
                       </td>
                       <td className="px-4 py-3">
@@ -718,7 +733,28 @@ export function ControllerRegistry() {
                               {actionBusy[ctrl.controller_id] ? tr('controllerRegistry.processing') : tr('controllerRegistry.activate')}
                             </Button>
                           )}
-                          {(ctrl.status === 'pending' || ctrl.status === 'active') && (
+                          {ctrl.firmware_version === 'onoff_feeder-api' ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="default"
+                                disabled={actionBusy[ctrl.controller_id]}
+                                onClick={() => handleFeed(ctrl.controller_id, 'run')}
+                                aria-label={`${ctrl.controller_id} feed run`}
+                              >
+                                {tr('controllerRegistry.feedRun')}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={actionBusy[ctrl.controller_id]}
+                                onClick={() => handleFeed(ctrl.controller_id, 'stop')}
+                                aria-label={`${ctrl.controller_id} feed stop`}
+                              >
+                                {tr('controllerRegistry.feedStop')}
+                              </Button>
+                            </>
+                          ) : (ctrl.status === 'pending' || ctrl.status === 'active') ? (
                             <Button
                               size="sm"
                               variant="outline"
@@ -728,7 +764,7 @@ export function ControllerRegistry() {
                             >
                               {actionBusy[ctrl.controller_id] ? tr('controllerRegistry.testing') : tr('controllerRegistry.test')}
                             </Button>
-                          )}
+                          ) : null}
                           <Button
                             size="sm"
                             variant="outline"

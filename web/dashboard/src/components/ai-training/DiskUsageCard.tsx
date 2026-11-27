@@ -3,7 +3,7 @@ import { HardDrive } from 'lucide-react';
 import { Vision } from '../../lib/api';
 import type { CaptureDiskResponse } from '../../lib/types';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 const POLL_INTERVAL_MS = 60_000; // 1분 — 디스크 변동 느림
 

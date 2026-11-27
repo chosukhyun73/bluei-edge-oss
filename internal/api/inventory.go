@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,6 +226,143 @@ func (s *Server) handleInventoryPurchasesRoute(w http.ResponseWriter, r *http.Re
 	writeError(w, http.StatusNotFound, "NOT_FOUND", "expected /v1/inventory/purchases/{id}/documents", "")
 }
 
+// feedComposition — 사료(품목) 영양성분표(보증성분). 모두 optional(라벨에 있는 것만).
+// 값은 % 단위. 급이 AI(단백/지방 참조)·GDST 이력에 사용. [[사료 성분별 어류 관리 전략]]
+type feedComposition struct {
+	CrudeProteinPct    *float64 `json:"crude_protein_pct,omitempty"`    // 조단백질 ≥
+	CrudeFatPct        *float64 `json:"crude_fat_pct,omitempty"`        // 조지방 ≥
+	LysinePct          *float64 `json:"lysine_pct,omitempty"`           // 라이신 ≥
+	TotalPhosphorusPct *float64 `json:"total_phosphorus_pct,omitempty"` // 총인 ≥
+	MoisturePct        *float64 `json:"moisture_pct,omitempty"`         // 수분 ≤
+	CrudeFiberPct      *float64 `json:"crude_fiber_pct,omitempty"`      // 조섬유 ≤
+	CrudeAshPct        *float64 `json:"crude_ash_pct,omitempty"`        // 조회분 ≤
+	CalciumPct         *float64 `json:"calcium_pct,omitempty"`          // 칼슘 ≥
+	ProductModel       string   `json:"product_model,omitempty"`        // 제품모델 (예: N SK RCX 500 130A 6.0mm)
+	PelletSizeMm       *float64 `json:"pellet_size_mm,omitempty"`       // 펠릿 크기(mm)
+	TargetSpecies      string   `json:"target_species,omitempty"`       // 대상 어종
+}
+
+func (c *feedComposition) validate() error {
+	pcts := map[string]*float64{
+		"crude_protein_pct": c.CrudeProteinPct, "crude_fat_pct": c.CrudeFatPct,
+		"lysine_pct": c.LysinePct, "total_phosphorus_pct": c.TotalPhosphorusPct,
+		"moisture_pct": c.MoisturePct, "crude_fiber_pct": c.CrudeFiberPct,
+		"crude_ash_pct": c.CrudeAshPct, "calcium_pct": c.CalciumPct,
+	}
+	for name, v := range pcts {
+		if v != nil && (*v < 0 || *v > 100) {
+			return fmt.Errorf("%s must be 0..100", name)
+		}
+	}
+	if c.PelletSizeMm != nil && (*c.PelletSizeMm <= 0 || *c.PelletSizeMm > 50) {
+		return errors.New("pellet_size_mm must be 0..50")
+	}
+	return nil
+}
+
+// POST /v1/inventory/items/{id}/composition — 품목 영양성분표 등록/수정.
+func (s *Server) handleSetItemComposition(w http.ResponseWriter, r *http.Request, itemID string) {
+	item, err := s.store.GetInventoryItem(r.Context(), itemID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
+		return
+	}
+	if item == nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "inventory item not found: "+itemID, "")
+		return
+	}
+	var comp feedComposition
+	if err := json.NewDecoder(r.Body).Decode(&comp); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error(), "")
+		return
+	}
+	if err := comp.validate(); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "INVALID_COMPOSITION", err.Error(), "")
+		return
+	}
+	comp.ProductModel = strings.TrimSpace(comp.ProductModel)
+	comp.TargetSpecies = strings.TrimSpace(comp.TargetSpecies)
+	b, err := json.Marshal(comp)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "MARSHAL_FAILED", err.Error(), "")
+		return
+	}
+	if err := s.store.SetInventoryComposition(r.Context(), itemID, string(b)); err != nil {
+		writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
+		return
+	}
+	item.CompositionJSON = string(b)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": inventoryItemToMap(item)})
+}
+
+// GET /v1/inventory/items/{id}/... (dispatch)
+func (s *Server) handleInventoryItemsRoute(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/inventory/items/")
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) == 2 && parts[1] == "composition" && parts[0] != "" {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleSetItemComposition(w, r, parts[0])
+		return
+	}
+	writeError(w, http.StatusNotFound, "NOT_FOUND", "expected /v1/inventory/items/{id}/composition", "")
+}
+
+// GET /v1/inventory/purchases?category=feed&limit=50 — 구매(입고) 이력 목록 (최신순).
+func (s *Server) handleListPurchasesHistory(w http.ResponseWriter, r *http.Request) {
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	if category != "" && !events.ValidInventoryCategory(category) {
+		writeError(w, http.StatusUnprocessableEntity, "INVALID_CATEGORY", "category invalid: "+category, "")
+		return
+	}
+	limit := 50
+	if l := strings.TrimSpace(r.URL.Query().Get("limit")); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	// 카테고리는 payload 안에 있어 Go 에서 필터 → 넉넉히 조회 후 잘라낸다.
+	evs, err := s.store.QueryEvents(r.Context(), storage.EventFilter{
+		EventType: events.EventInventoryPurchaseRecorded,
+		Limit:     limit * 4,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
+		return
+	}
+	out := make([]map[string]any, 0, limit)
+	for _, e := range evs {
+		var p events.InventoryPurchaseRecordedPayload
+		if json.Unmarshal([]byte(e.PayloadJSON), &p) != nil {
+			continue
+		}
+		if category != "" && p.Category != category {
+			continue
+		}
+		out = append(out, map[string]any{
+			"purchase_id":  p.PurchaseID,
+			"item_id":      p.ItemID,
+			"category":     p.Category,
+			"name":         p.Name,
+			"unit":         p.Unit,
+			"qty":          p.Qty,
+			"unit_price":   p.UnitPrice,
+			"total_price":  p.TotalPrice,
+			"supplier":     p.Supplier,
+			"lot":          p.Lot,
+			"purchased_at": p.PurchasedAt,
+			"notes":        p.Notes,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "count": len(out)})
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 // consumeInventory — 재고 −qty + consumption 이벤트. 사료/투약/자재사용 공통.
@@ -333,6 +471,11 @@ func inventoryItemToMap(it *storage.InventoryItem) map[string]any {
 	if it.ReorderLevel != nil {
 		m["reorder_level"] = *it.ReorderLevel
 		m["below_reorder"] = it.OnHandQty < *it.ReorderLevel
+	}
+	if strings.TrimSpace(it.CompositionJSON) != "" {
+		m["composition"] = json.RawMessage(it.CompositionJSON)
+	} else {
+		m["composition"] = nil
 	}
 	return m
 }

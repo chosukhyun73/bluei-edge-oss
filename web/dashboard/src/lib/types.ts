@@ -36,7 +36,16 @@ export type Tank = {
   volume_m3?: number;
   biomass_kg?: number;
   fish_count?: number;
+  /** 마지막 실측 샘플링 값(앵커). 샘플링을 안 하면 몇 달이고 그대로다. */
   avg_weight_g?: number;
+  /** 급이량 기반 성장 추정치 (매일 갱신, GET /v1/tanks 가 실어준다). */
+  estimated_avg_weight_g?: number;
+  weight_anchor_g?: number;
+  weight_anchor_source?: string;
+  /** 마지막 실측 이후 경과일 — 클수록 추정치의 외삽 구간이 길다. */
+  weight_days_since_anchor?: number;
+  /** "ok" | "stale_sampling" | "low_data" */
+  weight_quality?: string;
   target_ranges?: TargetRange[];
   metadata?: Record<string, unknown>;
   group_id?: string | null;
@@ -89,6 +98,8 @@ export type FeedCycle = {
   intent_reason?: string | null;
   // C-3l: arbiter_decisions.decision_id 역조회 echo — 운영자 dispute 첨부용.
   decision_id?: string | null;
+  // AI 스케줄(ai_advisory/ai_autonomous) vs 수동(manual_override) — 오늘 진행 집계 구분용.
+  priority?: string | null;
   // Phase B: ESP32 살포(DAC1) / 공급(DAC2) 모터 출력 echo.
   // rpm 14~42 (0/undefined = 펌웨어 default), amount 0~255.
   speed_rpm?: number | null;
@@ -98,12 +109,99 @@ export type FeedCycle = {
   silo_depletion_warned?: boolean | null;
 };
 
+// 사이클 완료 자동 보고 — backend feed.cycle.report 이벤트 payload (2026-07-05).
+export type FeedCycleReport = {
+  report_id: string;
+  cycle_id: string;
+  tank_id: string;
+  mode: FeedCycleMode;
+  priority?: string | null;
+  started_at: string;
+  completed_at: string;
+  duration_s: number;
+  pulses_executed: number;
+  total_amount_g: number;
+  actual_total_amount_g?: number | null;
+  target_amount_g?: number | null;
+  termination_reason?: string | null;
+  clip_count: number;
+  lrcn?: {
+    mean_score: number;
+    per_camera: { camera_id: string; score: number; model_version?: string }[];
+  } | null;
+  agitation?: {
+    max_peak_rise_frac: number;
+    startle_suspect: boolean;
+    per_camera: {
+      clip_id: string;
+      camera_id: string;
+      peak_rise_frac: number;
+      calm_reached: boolean;
+      startle_suspect: boolean;
+      n_seconds: number;
+      peak_at_s: number;
+    }[];
+  } | null;
+  // 축1 1b — 섀도 멈춤 판정 (기록만, 실제 중단 아님). stop_at_pulse 0 = 중단 없음.
+  shadow_judge?: {
+    rule: string;
+    track: 'U' | 'T';
+    priors: number[];
+    stop_at_pulse: number;
+    pulses_saved?: number;
+    source: 'live' | 'clip';
+    shadow: boolean;
+    // gap끝 복귀도 병기 (2026-07-08) — true = 기저×1.2 이내 복귀(만복 방향)
+    gap_end_recovery?: boolean[];
+    gap_end_ratio?: number[];
+    // v1 (2026-08-03) — 배출 확인과 반응 판정을 분리한 중단 판정.
+    // 무배출(차트값 < discharge_min) 펄스는 식욕 판단에서 제외하고, 잦으면
+    // 중단이 아니라 급이기 이상(feeder_fault)으로 본다. v0 는 둘을 못 갈랐다.
+    v1?: {
+      rule: string;
+      scale: number;
+      values: number[];      // 펄스별 차트값 (화면 요동 곡선과 같은 자)
+      discharged: boolean[]; // ① 배출 확인
+      no_discharge: number;
+      stop_at_pulse: number; // ③ 0 = 중단 없음
+      feeder_fault: boolean; // ④
+      discharge_min: number;
+      low_reaction: number;
+      shadow: boolean;
+    };
+  } | null;
+  // 펄스별 실배출 판정 (2026-07-08) — 요동 국소상승 채널. 기록 전용.
+  discharge_check?: {
+    channel: string;
+    per_pulse: ('yes' | 'unclear' | 'no' | 'unknown')[];
+    suspected_no_discharge: number;
+    // 사이클 통째 판정 (2026-07-29) — 펄스 열과 요동 봉우리 열의 일치도(-1~1).
+    // 펄스별 판정이 포화로 무너지는 구간에서도 남는 신호. 기록·경보 전용.
+    pattern_match?: number;
+  } | null;
+  // 보상 펄스 라이브 판정 (2026-07-08) — gap끝 라이브 채널. 표기는 이쪽 verdict 우선
+  // (보고 채널은 보상 피크가 σ 를 오염시켜 과비관 — 2026-07-09 육안 대조 실측).
+  compensation?: {
+    channel: string;
+    granted_total: number;
+    deducted_g: number;
+    // gate_pass — 보상 정밀 게이트 결과 (2026-07-30). false = 게이트가 "배출된 것으로
+    // 보인다"고 판단해 보상을 보류. verdict 는 기록 보존을 위해 'no' 로 남으므로,
+    // 화면·모달 표시는 effectivePulseVerdicts() 를 써야 한다. undefined = 게이트 미평가.
+    per_pulse: { pulse_no: number; verdict: 'yes' | 'unclear' | 'no'; granted: boolean; gate_pass?: boolean }[];
+  } | null;
+  generated_at: string;
+};
+
 export type AdaptiveParams = {
   target_amount_g: number;
   max_pulses?: number;
   max_duration_min?: number;
   gap_ms?: number;
   pulse_duration_ms?: number;
+  // WP-F: onoff_feeder(on/off) 마이크로펄스 — run초 가동 → stop초 정지 반복. 0/미지정이면 config 기본값.
+  run_sec?: number;
+  stop_sec?: number;
   // Phase B: 살포모터 rpm (14~42, 0 = default), 공급모터 amount (0~255).
   speed_rpm?: number;
   amount?: number;
@@ -148,6 +246,8 @@ export type NewIntentBody = {
   intent_type: IntentType;
   reason: string;
   context?: Record<string, unknown>;
+  // 즉시 실행 경로(카메라 뷰 등) — 의도는 기록하되 동기 LLM 종합판단을 건너뜀.
+  skip_llm?: boolean;
 };
 
 // F.2 — LLM 종합 판단 결과 (operator_intents POST 응답 + context_json 에 저장).
@@ -296,6 +396,15 @@ export type StateVector = {
     has_active_weights: boolean;
     notes: string[];
   };
+  convergence: {
+    sample_count: number;
+    recent_gap?: number;         // 최근 평균 |운영자-AI|
+    convergence_score?: number;  // 1-recent_gap (높을수록 수렴=정확)
+    trend?: number;              // 음수=격차 줄어드는 중
+    direction: 'improving' | 'worsening' | 'stable' | 'insufficient';
+    series?: Array<{ at: string; gap: number; op: number; ai: number; diff: number }>;
+    notes: string[];
+  };
   anomaly: {
     has_model: boolean;
     open_alerts?: AnomalyAlert[];
@@ -350,6 +459,34 @@ export type Camera = {
   tilt_deg?: number;             // 0=수평, 90=수직 아래
   purpose?: CameraPurpose[];
 };
+
+// ── 공통(수조 비종속) 카메라 배치 구분 ───────────────────────────────────────
+// metadata.view_scope='common' 인 카메라는 특정 수조가 아니라 공통 영역에 표시된다
+// (수중/수처리/보안 등). metadata.area 로 구역을 구분. DB 마이그레이션 없이 metadata 활용.
+export type CommonCameraArea = 'underwater' | 'water_treatment' | 'security' | 'other';
+
+export const COMMON_CAMERA_AREA_OPTIONS: { value: CommonCameraArea; label: string }[] = [
+  { value: 'underwater', label: 'cameraArea.underwater' },
+  { value: 'water_treatment', label: 'cameraArea.waterTreatment' },
+  { value: 'security', label: 'cameraArea.security' },
+  { value: 'other', label: 'cameraArea.other' },
+];
+
+// 카메라가 수조 셀에 속하는지(tank) 공통 영역인지(common) 판별.
+// view_scope 미지정 레거시는 비-탑뷰(수중 등)를 공통으로 간주.
+export function cameraViewScope(c: Camera): 'tank' | 'common' {
+  const s = (c.metadata as Record<string, unknown> | undefined)?.['view_scope'];
+  if (s === 'common') return 'common';
+  if (s === 'tank') return 'tank';
+  const pos = c.position ?? '';
+  return pos !== '' && pos !== 'top' ? 'common' : 'tank';
+}
+
+export function cameraCommonArea(c: Camera): CommonCameraArea {
+  const a = (c.metadata as Record<string, unknown> | undefined)?.['area'];
+  if (a === 'underwater' || a === 'water_treatment' || a === 'security' || a === 'other') return a;
+  return (c.position ?? '') === 'underwater' ? 'underwater' : 'other';
+}
 
 // C-11 deprecated — backward compat 만. 새 코드는 MountLocation + ViewAngle 사용.
 /** @deprecated use MountLocation + ViewAngle (C-12) */
@@ -767,6 +904,7 @@ export type NewTreatmentBody = {
 
 export type NewMortalityBody = {
   dead_count: number;
+  dead_weight_g?: number;
   estimated_cause?: string;
   observed_at?: string;
   operator_id?: string;
@@ -888,6 +1026,8 @@ export type NewCameraBody = {
   tilt_deg?: number;
   // RTSP 경로 (선택). { sub: { path }, main: { path } }. 비우면 backend 가 vendor 기본 경로 fallback.
   stream_profiles?: Record<string, unknown>;
+  // 자유 메타. 공통 카메라 배치 구분(view_scope/area) 등을 저장 — backend metadata_json 영속.
+  metadata?: Record<string, unknown>;
 };
 
 // ── Predictive forecast types (GET /v1/predictive/forecast) ──────────────────
@@ -910,6 +1050,14 @@ export type SchedulePattern = {
   gap_ms: number;
   total_pulses: number;
   target_amount_g?: number | null;
+  // 수온 급변 감산 — backend AIScheduler 가 target_amount_g 에 이미 곱해 둔 계수와 근거
+  // (2026-10-03). 없거나 1.0 이면 감산 없음. 프론트는 이 값을 계산하지 않는다 —
+  // 같은 판정을 두 군데서 하면 반드시 어긋난다.
+  reduction_factor?: number;
+  reduction_reason?: 'rapid_change_24h' | 'adaptation_48h';
+  temp_now_c?: number;
+  temp_24h_ago_c?: number;
+  target_before_cut_g?: number;
 };
 
 export type SchedulePriority = 'manual_override' | 'ai_advisory';
@@ -1047,6 +1195,35 @@ export type WeightHistoryResponse = {
   days: number;
   tank_id?: string;
   snapshots: WeightHistorySnapshot[];
+};
+
+// 실측중량 샘플링 (2026-07-18). 추정중량 곡선과 구분해 차트에 오버레이.
+export type SamplingItem = {
+  sampling_id: string;
+  sampled_at: string;
+  avg_weight_g: number;
+  sampled_count: number;
+  health_score?: number;
+  stocking_id?: string;
+  recorded_by: string;
+};
+
+export type SamplingResponse = {
+  tank_id: string;
+  current: Record<string, unknown> | null;
+  history: SamplingItem[];
+};
+
+// FCR 직접 입력 조회 (2026-07-17). source: "manual" | "sampling" | "default".
+export type FCRStatusResponse = {
+  tank_id: string;
+  default_fcr: number;
+  fcr_known: boolean;
+  calibrated_fcr?: number;
+  observed_fcr?: number;
+  deviation_pct?: number;
+  source: string;
+  calibrated_at?: string;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1481,6 +1658,7 @@ export type VisionAlgorithm = {
     requires_operator_labels?: boolean;
     runtime?: string;
     weights_path?: string;
+    training_pipeline?: string; // 'offline_segments' 등 — 화면 학습 버튼 미연결 표시
   };
   validation?: Record<string, unknown>;
 };
@@ -1498,6 +1676,7 @@ export type VisionAlgorithmHistoryEntry = {
   applied_at?: string;
   removed_at?: string;
   operator_id?: string;
+  note?: string; // 평가 요약 — 롤백 비교용
 };
 
 export type VisionAlgorithmActiveState = {
@@ -1505,7 +1684,10 @@ export type VisionAlgorithmActiveState = {
   active_job_id?: string;
   applied_at?: string;
   operator_id?: string;
+  note?: string; // 평가 요약 (예: 3자 비교 수치)
   history?: VisionAlgorithmHistoryEntry[];
+  candidate_path?: string; // 적용 대기 후보 (없으면 promote 비활성)
+  candidate_job_id?: string;
 };
 
 export type VisionAlgorithmApplyResponse = {
@@ -1557,6 +1739,81 @@ export type VisionObservationsResponse = {
   tank_id?: string;
 };
 
+// GET /v1/vision/agitation/recent — 요동곡선 목록 (추론 모니터링 활동성 표시용)
+export type VisionAgitationRecentItem = {
+  clip_id: string;
+  camera_id: string;
+  captured_at: string;
+  recorded_at: string;
+  n_seconds: number;
+  baseline: number;
+  peak: number;
+  series: number[];
+};
+
+export type VisionAgitationRecentResponse = {
+  count: number;
+  items: VisionAgitationRecentItem[];
+  // P90 정규화 계수의 하한 (2026-08-02) — 백엔드 config feed_cycle.satiation_rise_p90_floor.
+  // 과증폭 방지용. 프론트가 상수로 들고 있으면 백엔드와 어긋나므로 여기서 받는다.
+  rise_p90_floor?: number;
+  // 카메라별 반응 천장 (2026-08-05) — 백엔드 config feed_cycle.rise_anchor_by_camera.
+  // 있으면 P90 계산 대신 이 값으로 나눈다 (1.00 = 그 카메라 최고 반응).
+  // 없는 카메라는 종전 P90 폴백 (미캘리브레이션).
+  rise_anchor_by_camera?: Record<string, number>;
+};
+
+// GET /v1/vision/agitation/live — 진행 중 사이클의 실시간 요동 (in-memory 세션).
+// series 는 raw(초당) — 프론트가 클립과 동일한 P90 정규화를 적용한다.
+export type VisionAgitationLiveItem = {
+  cycle_id: string;
+  tank_id: string;
+  camera_id: string;
+  baseline: number;
+  started_at: string;
+  series: number[];
+};
+
+export type VisionAgitationLiveResponse = {
+  count: number;
+  items: VisionAgitationLiveItem[];
+};
+
+// GET /v1/vision/agitation/baseline — 평소 활동성 (baseline 클립 요동 대표값)
+export type VisionAgitationBaselineItem = {
+  clip_id: string;
+  tank_id: string;
+  camera_id: string;
+  captured_at: string;
+  recorded_at: string;
+  n_seconds: number;
+  mean: number;
+  peak: number;
+  night: boolean; // 야간(IR) 측정 — 주간과 스케일 상이, 주/야 분리 정규화
+};
+
+export type VisionAgitationBaselineResponse = {
+  count: number;
+  items: VisionAgitationBaselineItem[];
+};
+
+// GET /v1/vision/model-scores/recent — 펄스별 r3 채점 (펄스당 1행)
+export type VisionModelScoreItem = {
+  cycle_id: string;
+  tank_id: string;
+  camera_id: string;
+  model_version: string;
+  pulse_no: number;
+  feeding_score: number;
+  pulse_at: string; // "" = 펄스 시각 조인 실패
+  recorded_at: string;
+};
+
+export type VisionModelScoresResponse = {
+  count: number;
+  items: VisionModelScoreItem[];
+};
+
 // G-4 cycle 종료 dispute auto-modal.
 export type VisionDisputeVerdict = 'correct' | 'wrong' | 'unsure';
 
@@ -1567,10 +1824,20 @@ export type VisionObservationDisputeBody = {
   verdict: VisionDisputeVerdict;
   reason?: string;
   operator_score?: number; // G-4 단일 슬라이더 (legacy, 호환)
+  ai_score?: number;       // 제출 시점 모달 프리필 AI 점수 (수렴 지표 원천)
   pre_score?: number;      // R5: 급이 전 안정성 0~1
   during_score?: number;   // R5: 급이 도중 반응 0~1
   clip_ref?: string;       // R5: 라벨이 가리키는 observation clip mp4 path
   algorithm_id?: string;   // R11: 어느 LRCN 모델용 라벨인지
+  // 운영자 실배출 관찰 (2026-07-17) — discharge_check 판정의 ground truth
+  operator_discharge?: 'full' | 'partial' | 'none';
+  // 프리필 조작 여부 (2026-07-23) — false = AI 프리필을 그대로 수락(독립 라벨 아님).
+  // 학습·편향보정에서 걸러내기 위한 표식. 값 비교로는 우연 일치와 구분 불가.
+  prefill_modified?: boolean;
+  // 배출 ✓/✗ 조작 여부 — false = 시스템 판정을 그대로 수락. prefill_modified 와 같은 역할을
+  // 배출 축에서 한다. CycleCompletionDispute 가 이미 보내고 backend 도 받는데 이 타입에만
+  // 빠져 있어 `tsc -b` 가 실패했다(대시보드 빌드 차단). 선언만 추가 (2026-10-03).
+  discharge_modified?: boolean;
 };
 
 export type VisionObservationDispute = {
@@ -1634,13 +1901,19 @@ export type VisionBootstrapBox = {
   y: number;
   w: number;
   h: number;
-  class: 'fish' | 'food' | 'exclude';
+  class: 'fish' | 'fish_abnormal' | 'food' | 'pellet' | 'feces' | 'exclude';
 };
 
 // POST /v1/vision/bootstrap/labels body
 export type VisionBootstrapSaveBody = {
   camera_id: string;
+  tank_id?: string;
   snapshot_ref?: string;
+  // 바닥 스틸(③ 탭) 라벨링 시 원본 still_id — floor-stills 목록의 완료 추적용
+  origin_still_id?: string;
+  // 클립 프레임(① 탭) 라벨링 시 원본 clip_id + 클립 내 시점(초) — 풀 로테이션용
+  origin_clip_id?: string;
+  frame_offset_sec?: number;
   operator_id?: string;
   boxes: VisionBootstrapBox[];
   // base64 JPEG (data:image/jpeg;base64,...) — 저장 시 frame 같이 보냄
@@ -1681,6 +1954,99 @@ export type VisionTrainingPoolResponse = {
   camera_id_filter?: string;
 };
 
+// 클립 요동곡선 요약 + 제안 점수(먹이반응 prior). found=false 면 곡선 미계산 클립.
+export type VisionAgitationResponse = {
+  clip_id: string;
+  found: boolean;
+  n_seconds?: number;
+  baseline?: number;
+  peak?: number;
+  peak_at_s?: number;
+  last5_mean?: number;
+  calm_reached?: boolean;
+  auc_above_baseline?: number;
+  peak_rise_frac?: number;    // (peak−baseline)/baseline
+  suggested_score?: number;   // clamp(peak_rise_frac, 0, 1) — 참고용 prior
+  startle_suspect?: boolean;  // 진정 미도달 + 말미 피크 = 놀람·오염 의심
+  series?: number[];
+};
+
+// docs/50 — 펄스 세그먼트별 채점 (통클립 1점 dispute 대신). GET /v1/vision/segments?cycle_id=.
+export type VisionSegmentSummary = {
+  index: number;
+  pulse_no: number;
+  start_abs: string;
+  end_abs: string;
+  duration_ms: number;
+};
+
+export type VisionClipSegment = {
+  index: number;
+  pulse_no: number;
+  offset_start_ms: number; // 그 클립(카메라) 원본 mp4 대비 오프셋 — video.currentTime 과 동일 축(초 단위로 나눠 사용)
+  offset_end_ms: number;
+  duration_ms: number;
+  agitation_prior?: number; // 요동곡선 있는 클립만 존재 (참고용 제안 점수)
+  model_score?: number; // 2-head 세그먼트 모델 사전 채점 (있으면 프리필 우선, 요동 prior 폴백)
+  seg_peak?: number;
+  seg_mean?: number;
+  seg_baseline?: number;
+  prior_camera_id?: string; // prior 출처가 이 클립의 카메라와 다를 때(수중캠 → 탑뷰 곡선 대체)
+  prior_unreliable?: boolean; // 비수중 곡선이 없어 수중캠 자기 곡선을 쓴 경우(포화 주의)
+};
+
+export type VisionSegmentsClip = {
+  clip_id: string;
+  camera_id: string;
+  started_at: string;
+  uri: string;
+  has_agitation?: boolean;
+  segments: VisionClipSegment[];
+};
+
+export type VisionSegmentsResponse = {
+  cycle_id: string;
+  found: boolean;
+  tank_id?: string;
+  model_version?: string; // 세그먼트 모델 사전 채점의 모델 버전 (없으면 빈 문자열)
+  pulse_count?: number;
+  policy_pulse_sum_ms?: number;
+  segments?: VisionSegmentSummary[];
+  clips?: VisionSegmentsClip[];
+};
+
+// POST /v1/vision/segment-labels — 카메라(클립)당 1회 저장.
+export type SegmentLabelSource = 'prior' | 'operator';
+
+export type SegmentLabelInput = {
+  pulse_no: number;
+  offset_start_ms: number;
+  offset_end_ms: number;
+  score: number;      // 0=사료 섭이 안 함 ~ 1=먹이를 열심히 먹음
+  prior?: number;      // 요동 제안값(감사용)
+  source: SegmentLabelSource;
+  excluded?: boolean;        // 격리(판단 불가)
+  exclude_reason?: string;   // 격리 사유 (excluded=true 시)
+};
+
+export type VisionSegmentLabelSaveBody = {
+  cycle_id: string;
+  clip_id: string;
+  camera_id: string;
+  tank_id?: string;
+  operator_id: string;
+  algorithm_id?: string;
+  segments: SegmentLabelInput[];
+  // 운영자가 배출 ✓/✗ 를 실제로 고쳤는가. 배출 분류는 시스템 판정이 프리필되므로
+  // 이 값이 false 인 라벨은 정답지로 쓸 수 없다 (2026-08-12).
+  discharge_modified?: boolean;
+};
+
+export type VisionSegmentLabelSaveResponse = {
+  ok: boolean;
+  sequence: number;
+};
+
 // R15/R16 — captures 디렉토리 디스크 사용량 + retention 정책 상태
 export type CaptureDiskResponse = {
   captures_dir: string;
@@ -1694,9 +2060,11 @@ export type CaptureDiskResponse = {
   excluded: Record<string, { count: number; size_bytes: number }>;
 };
 
+// GET /v1/vision/training/jobs — 이벤트 스트림 원본 (한 job 이 update 이벤트 여러 건).
+// 소비 측은 payload 평탄화 + job_id 최신(sequence DESC 첫 건)만 사용.
 export type VisionTrainingJobsResponse = {
   count: number;
-  items: VisionTrainingJob[];
+  items: { event_id: string; payload: VisionTrainingJob; recorded_at?: string; sequence?: number }[];
 };
 
 export type VisionTrainingStatus = {
@@ -1730,6 +2098,20 @@ export type VisionTrainingStatus = {
     required: number;
     can_start_training: boolean;
   };
+  /** 학습 준비도 — export 와 동일 필터로 집계한 클래스별 커버리지 (promote 병목 지표). */
+  coverage?: {
+    classes: { class: string; boxes: number; frames: number; top5_box_share: number }[];
+    time_of_day: Record<string, number>;
+    recommended_frames: number;
+    target_frames_per_class: number;
+    last_run: { job_id: string; metrics: Record<string, unknown> | null; completed_at: string } | null;
+  };
+  /** LRCN 세그먼트 라벨 게이트 (3차 학습 트리거 = 유효 1,000+). */
+  segments?: {
+    valid_rows: number;
+    excluded: number;
+    gate: number;
+  } | null;
   safety_note?: string;
 };
 
@@ -1742,10 +2124,11 @@ export type VisionBootstrapLabel = {
   [key: string]: unknown;
 };
 
+// GET /v1/vision/bootstrap/labels — 이벤트 래퍼 원본. 소비 측은 payload 평탄화.
 export type VisionBootstrapLabelsResponse = {
   count: number;
   total_boxes: number;
-  items: VisionBootstrapLabel[];
+  items: { event_id: string; payload: VisionBootstrapLabel; recorded_at?: string; sequence?: number }[];
 };
 
 // ── 재고 관리 (Inventory) ─────────────────────────────────────────────────────
@@ -1754,6 +2137,21 @@ export type VisionBootstrapLabelsResponse = {
 //          /v1/inventory/purchases/{id}/documents (POST multipart)
 
 export type InventoryCategory = 'feed' | 'drug' | 'material';
+
+// 사료 영양성분표(보증성분). 모두 optional(라벨에 있는 것만). 값은 % 단위(펠릿만 mm).
+export type FeedComposition = {
+  crude_protein_pct?: number;
+  crude_fat_pct?: number;
+  lysine_pct?: number;
+  total_phosphorus_pct?: number;
+  moisture_pct?: number;
+  crude_fiber_pct?: number;
+  crude_ash_pct?: number;
+  calcium_pct?: number;
+  product_model?: string;
+  pellet_size_mm?: number;
+  target_species?: string;
+};
 
 export type InventoryItem = {
   item_id: string;
@@ -1766,6 +2164,22 @@ export type InventoryItem = {
   notes?: string;
   reorder_level?: number;
   below_reorder: boolean;
+  composition?: FeedComposition | null;
+};
+
+export type PurchaseHistoryItem = {
+  purchase_id: string;
+  item_id: string;
+  category: InventoryCategory;
+  name: string;
+  unit: string;
+  qty: number;
+  unit_price?: number;
+  total_price?: number;
+  supplier?: string;
+  lot?: string;
+  purchased_at: string;
+  notes?: string;
 };
 
 export type InventoryListResponse = {
@@ -2077,4 +2491,15 @@ export type NewHatcheryTreatmentBody = {
   item_id?: string;
   consumed_qty?: number;
   notes?: string;
+};
+
+// 호퍼 잔량 원장 (2026-07-17 사료 소진 재발 방지)
+export type HopperEstimate = {
+  tank_id: string;
+  remaining_g_est: number | null; // null = 보충 기록 없음(추정 불가)
+  last_refill_at?: string;
+  last_refill_g?: number;
+  consumed_since_refill_g: number;
+  threshold_g: number;
+  low: boolean;
 };

@@ -43,13 +43,18 @@ type StagePolicy = {
 };
 
 type GetModel = {
-  base_get95_h: number;          // 18℃, 1%BW 기준
+  base_get95_h: number;          // 18℃, 1%BW 기준 (폴백 일반모델)
   q10: number;
   reference_temp_c: number;
   reference_meal_pct_bw: number;
   meal_exponent: number;          // 보수적
   next_feed_at_get_pct: number;   // 다음 급이 시작 GET % (운영 규칙)
   formula: string;
+  // vault 대서양연어 GET 정본 모델(참조표 검증): GET95(h)=α·BW_g^β·e^(−γ·T).
+  // 있으면 BW(평균체중) 기반 이 모델을 우선 사용. 출처: Obsidian Atlantic Salmon GET Model Report.
+  salmon_alpha?: number;         // α=16.3
+  salmon_beta?: number;          // β=0.31 (체중지수)
+  salmon_gamma?: number;         // γ=0.11 (온도계수, ≤18℃)
 };
 
 type SpeciesPolicy = {
@@ -99,7 +104,9 @@ export const SPECIES_POLICY: Record<string, SpeciesPolicy> = {
         },
         bsf_percent_bw_per_day: { aggressive: 2.0, standard: 1.5, conservative: 1.0 },
         feeding_pattern_default: {
-          pulse_duration_ms: 2500, gap_ms: 75_000, total_pulses: 6,
+          // 2026-07-04 강릉 실측 보정: 공급 3s + 정지 6s (onoff_feeder 리드 11s 는 backend 가 ON 에 가산).
+          // backend ai_scheduler.go speciesPolicyTable 과 동기.
+          pulse_duration_ms: 3000, gap_ms: 6_000, total_pulses: 6,
           // 성어: 멀리 분사 + 공급량 많이.
           speed_rpm: 32, amount: 180,
         },
@@ -113,15 +120,24 @@ export const SPECIES_POLICY: Record<string, SpeciesPolicy> = {
       reference_temp_c: 18,
       reference_meal_pct_bw: 1.0,
       meal_exponent: 0.5,
-      next_feed_at_get_pct: 50,
-      formula: 'GET_95(T, M) = 24 × 2^((18−T)/10) × (M/1.0)^0.5',
+      next_feed_at_get_pct: 95,   // 소화(95% 위배출) 후 재급이
+      formula: 'GET95(h) = 16.3 × BW_g^0.31 × e^(−0.11×T)  [vault 대서양연어 정본]',
+      salmon_alpha: 16.3,
+      salmon_beta: 0.31,
+      salmon_gamma: 0.11,
     },
   },
 };
 
 export const DEFAULT_FALLBACK_TEMP_C = 14;   // sensor 없을 때 fallback
-export const MAX_DAILY_CYCLES = 4;            // 운영 캡 (사용자 결정)
+export const MAX_DAILY_CYCLES = 6;            // 운영 캡 (분할 상한)
 export const DEFAULT_BSF_MODE: BsfMode = 'standard';
+
+// 1회 최대 투여량(수처리 부하 상한, %BW). 1일 급이량을 이 상한으로 나눠 급이 횟수 N 산정.
+//   1회최대량(g) = biomass_kg × MEAL_CAP_PCT_BW/100 × 1000  (biomass=개체수×체중 → "개체수 기준")
+//   N = ceil(1일량 / 1회최대량) = ceil(BSF% / MEAL_CAP_PCT_BW), [1, MAX_DAILY_CYCLES] clamp.
+// ⚠ 잠정값: 6mm 사료 초당 배출·개체당 섭취 실측(WP-G) 나오면 보정. RAS 수처리 순간부하 분산이 목적.
+export const DEFAULT_MEAL_CAP_PCT_BW = 0.25;
 
 // ── 계산 헬퍼 ────────────────────────────────────────────────────────────────
 
@@ -165,9 +181,11 @@ export type FeedingPolicyComputation = {
   temperature_source: 'sensor' | 'fallback';
   get95_h: number | null;
   get50_h: number | null;
+  get80_h: number | null;         // GET80(DT80) 소화간격(h) — 참고·경고용(하드 제약 아님)
   daily_cycles: number | null;
   cycle_target_amount_g: number | null;
   cycle_meal_pct_bw: number | null;
+  meal_max_g: number | null;      // 1회 최대 투여량(수처리 부하 상한, g)
 
   // 사이클 폼 default
   feeding_pattern_default: StagePolicy['feeding_pattern_default'] | null;
@@ -215,12 +233,25 @@ export function computeGet95(
   model: GetModel,
   temp_c: number,
   meal_pct_bw: number,
+  bw_g?: number | null,
 ): number {
+  // vault 대서양연어 BW 기반 정본 모델 우선: GET95 = α·BW_g^β·e^(−γ·T)
+  if (model.salmon_alpha != null && bw_g != null && bw_g > 0) {
+    return model.salmon_alpha
+      * Math.pow(bw_g, model.salmon_beta as number)
+      * Math.exp(-(model.salmon_gamma as number) * temp_c);
+  }
+  // 폴백: 일반 meal 기반 모델
   const tempPart = Math.pow(model.q10, (model.reference_temp_c - temp_c) / 10);
   const mealPart = Math.pow(meal_pct_bw / model.reference_meal_pct_bw, model.meal_exponent);
   return model.base_get95_h * tempPart * mealPart;
 }
 
+// GET80(DT80) = GET95 / 1.86 — 80% 위배출 시각(지수배출 ln0.20/ln0.05≈1/1.86). 최소 재급이 간격(소화 후 재급이).
+export const SALMON_GET80_FACTOR = 1 / 1.86;
+export function computeGet80(get95_h: number): number {
+  return get95_h * SALMON_GET80_FACTOR;
+}
 export function computeGet50(get95_h: number): number {
   return get95_h * GET50_FACTOR;
 }
@@ -233,6 +264,8 @@ export type ComputeInputs = {
   bsf_mode: BsfMode;
   temperature_c?: number | null;        // sensor 실측. null/undefined → fallback
   max_daily_cycles?: number;
+  meal_cap_pct_bw?: number;             // 1회 최대 투여량(%BW). null → DEFAULT_MEAL_CAP_PCT_BW
+  daily_cycles?: number;                // >0 = 직접 지정(자동 산출 대체). backend AIScheduler 동일 (2026-07-07)
 };
 
 export function computeFeedingPolicy(input: ComputeInputs): FeedingPolicyComputation {
@@ -304,22 +337,34 @@ export function computeFeedingPolicy(input: ComputeInputs): FeedingPolicyComputa
   // GET / 분할
   let get95_h: number | null = null;
   let get50_h: number | null = null;
+  let get80_h: number | null = null;
   let daily_cycles: number | null = null;
   let cycle_target_amount_g: number | null = null;
   let cycle_meal_pct_bw: number | null = null;
+  let meal_max_g: number | null = null;
 
   if (daily_feed_g != null && biomass_kg > 0) {
-    // 추정 1회량 (초기 추정 3 분할)
-    const estimate_per_cycle_g = daily_feed_g / 3;
-    const meal_pct_bw = (estimate_per_cycle_g / biomass_kg) * 0.1; // g/kg → %BW (×100/1000)
-    cycle_meal_pct_bw = meal_pct_bw;
-
-    get95_h = computeGet95(policy.get_model, temperature_c, meal_pct_bw);
-    get50_h = computeGet50(get95_h);
+    // 1회 최대 투여량(수처리 부하 상한) = biomass × meal_cap%BW.
+    const mealCapPct = input.meal_cap_pct_bw ?? DEFAULT_MEAL_CAP_PCT_BW;
+    meal_max_g = biomass_kg * (mealCapPct / 100) * 1000;
 
     const cap = input.max_daily_cycles ?? MAX_DAILY_CYCLES;
-    daily_cycles = Math.max(1, Math.min(cap, Math.floor(24 / get50_h)));
+    // 급이 횟수 N = 1일량 ÷ 1회최대량 (수처리 순간부하로 결정). GET80은 최소간격 검증만(하드 제약 아님).
+    daily_cycles = meal_max_g > 0
+      ? Math.max(1, Math.min(cap, Math.ceil(daily_feed_g / meal_max_g)))
+      : 1;
+    // 운영자 직접 지정(정책 daily_cycles) — 자동 산출·cap 대체. backend 와 동일 상한 12.
+    if (input.daily_cycles != null && input.daily_cycles > 0) {
+      daily_cycles = Math.min(12, input.daily_cycles);
+    }
     cycle_target_amount_g = Math.round(daily_feed_g / daily_cycles);
+
+    // GET 는 실제 회당량(cycle_target)의 meal%BW 로 계산 → 소화간격(GET80) 참고·경고용.
+    const meal_pct_bw = (cycle_target_amount_g / biomass_kg) * 0.1; // g/kg → %BW (×100/1000)
+    cycle_meal_pct_bw = meal_pct_bw;
+    get95_h = computeGet95(policy.get_model, temperature_c, meal_pct_bw, avg_weight_g);
+    get50_h = computeGet50(get95_h);
+    get80_h = computeGet80(get95_h);
   }
 
   // 사이클 폼 default
@@ -349,9 +394,11 @@ export function computeFeedingPolicy(input: ComputeInputs): FeedingPolicyComputa
     temperature_source,
     get95_h,
     get50_h,
+    get80_h,
     daily_cycles,
     cycle_target_amount_g,
     cycle_meal_pct_bw,
+    meal_max_g,
     feeding_pattern_default,
     max_duration_min,
     speed_rpm: feeding_pattern_default?.speed_rpm ?? null,
@@ -383,9 +430,11 @@ function emptyComputation(opts: {
     temperature_source: opts.temp_source,
     get95_h: null,
     get50_h: null,
+    get80_h: null,
     daily_cycles: null,
     cycle_target_amount_g: null,
     cycle_meal_pct_bw: null,
+    meal_max_g: null,
     feeding_pattern_default: null,
     max_duration_min: null,
     speed_rpm: null,
@@ -393,4 +442,19 @@ function emptyComputation(opts: {
     warnings: opts.warnings,
     block_reason: opts.block,
   };
+}
+
+// feedingWeightG — 급이 계산에 쓸 평균 체중(g). 급이량 역산 추정치를 우선한다
+// (운영자 결정 2026-10-03). backend AIScheduler 의 feedingWeightProfile 과 같은 기준이다.
+//
+// avg_weight_g 는 마지막 샘플링 실측 앵커라 시간이 지날수록 실제와 벌어진다 — 2026-10-03
+// 기준 91일 전 857g 인데 역산 추정은 1,389g 으로 1.62배 차이였고, 그래서 화면의 회당량
+// (163g)이 실제 급이량(191g)과 맞지 않았다. 추정치가 없을 때만 앵커로 폴백한다.
+export function feedingWeightG(t: {
+  avg_weight_g?: number | null;
+  estimated_avg_weight_g?: number | null;
+}): number | null {
+  const est = t.estimated_avg_weight_g;
+  if (est != null && est > 0) return est;
+  return t.avg_weight_g ?? null;
 }

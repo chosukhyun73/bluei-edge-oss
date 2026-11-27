@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { dateLocale } from '../lib/format';
 import type { Group, Tank, TankLifecycleResponse, WeightHistoryResponse } from '../lib/types';
 import { Groups, Tanks } from '../lib/api';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Skeleton } from './ui/skeleton';
 import { FeedQuickControl } from './multitank/FeedQuickControl';
+import { FeedingScheduleCard } from './multitank/FeedingScheduleCard';
 
 type TankSnapshot = {
   tank: Tank;
@@ -28,7 +30,7 @@ function daysUntil(iso: string): number {
 }
 
 function fmtNumber(n: number, digits = 0): string {
-  return n.toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return n.toLocaleString(dateLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
 function progressBarColor(pct: number): string {
@@ -117,6 +119,8 @@ function TankCard({ snap }: { snap: TankSnapshot }) {
   }
 
   const initialCount = lifecycle.initial_count;
+  // 현재 마리수 = tank.fish_count(입식−폐사 반영) 우선, 없으면 입식 초기값.
+  const currentCount = tank.fish_count ?? initialCount;
   const initialWeight = lifecycle.initial_avg_weight_g;
   const targetWeight = lifecycle.target_harvest_weight_g;
   const targetDate = lifecycle.target_harvest_date;
@@ -163,7 +167,7 @@ function TankCard({ snap }: { snap: TankSnapshot }) {
       </div>
 
       <div className="text-xs text-gray-400">
-        {tr('tankCard.fishCount')} <span className="text-gray-200 font-mono">{fmtNumber(initialCount)}</span>
+        {tr('tankCard.fishCount')} <span className="text-gray-200 font-mono">{fmtNumber(currentCount)}</span>
       </div>
 
       <div>
@@ -244,7 +248,7 @@ function GroupSection({ block }: { block: GroupBlock }) {
       {tanks.length === 0 ? (
         <p className="text-xs text-gray-600 italic px-2 py-3">{tr('groupSection.noTanks')}</p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4 gap-3">
           {tanks.map(snap => (
             <TankCard key={snap.tank.tank_id} snap={snap} />
           ))}
@@ -339,7 +343,8 @@ export function ProductionOverview() {
       b => b.tanks.some(t => t.lifecycle || hasTankProfileData(t.tank)),
     ).length;
     const totalFish = operating.reduce(
-      (sum, s) => sum + (s.lifecycle?.initial_count ?? s.tank.fish_count ?? 0),
+      // tank.fish_count(입식−폐사 반영) 우선, 없으면 lifecycle 초기값.
+      (sum, s) => sum + (s.tank.fish_count ?? s.lifecycle?.initial_count ?? 0),
       0,
     );
     const fcrs = operating
@@ -358,7 +363,10 @@ export function ProductionOverview() {
     };
   })();
 
+  const allTanks = (blocks ?? []).flatMap(b => b.tanks.map(s => s.tank));
+
   return (
+    <div className="space-y-5">
     <Card>
       <CardHeader>
         <CardTitle>{tr('productionOverview.title')}</CardTitle>
@@ -437,5 +445,7 @@ export function ProductionOverview() {
         )}
       </CardContent>
     </Card>
+    {!loading && !error && blocks && <FeedingScheduleCard tanks={allTanks} />}
+    </div>
   );
 }

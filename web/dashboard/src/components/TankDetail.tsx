@@ -14,14 +14,12 @@ import { WaterSection } from './sections/WaterSection';
 import { EquipmentSection } from './sections/EquipmentSection';
 import { FeedingSection } from './sections/FeedingSection';
 import { BiologicalContextSection } from './sections/BiologicalContextSection';
-import { ConfidenceSection } from './sections/ConfidenceSection';
-import { AnomalySection } from './sections/AnomalySection';
-import { AdaptationSection } from './sections/AdaptationSection';
+import { ConvergenceSection } from './sections/ConvergenceSection';
 import { AutonomousSection } from './sections/AutonomousSection';
 import { DecisionsSection } from './sections/DecisionsSection';
 import { TankSettingsSection } from './sections/TankSettingsSection';
 import { FeedQuickControl } from './multitank/FeedQuickControl';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 interface Props {
   tankId: string;
@@ -238,6 +236,7 @@ export function TankDetail({ tankId, displayName, tank, onBack }: Props) {
           <TabsContent value="biological" className="space-y-4 pt-1">
             <SectionCard icon={<span className="text-green-500 text-sm">🌱</span>} title={tr('tankDetail.sectionBiologicalContext')}>
               <BiologicalContextSection
+                tankId={tankId}
                 data={state.biological_context}
                 weightSnapshots={weightSnapshots}
               />
@@ -251,17 +250,19 @@ export function TankDetail({ tankId, displayName, tank, onBack }: Props) {
 
           {/* 자율 & 결정 탭 */}
           <TabsContent value="autonomous" className="space-y-4 pt-1">
-            <SectionCard icon={<span className="text-green-500 text-sm">📊</span>} title={tr('tankDetail.sectionConfidence')}>
-              <ConfidenceSection data={state.confidence} />
+            <SectionCard icon={<span className="text-green-500 text-sm">🎯</span>} title={tr('tankDetail.sectionConvergence')}>
+              <ConvergenceSection data={state.convergence} />
             </SectionCard>
-            <SectionCard icon={<span className="text-orange-400 text-sm">⚠️</span>} title={tr('tankDetail.sectionAnomaly')}>
-              <AnomalySection data={state.anomaly} />
-            </SectionCard>
-            <SectionCard icon={<span className="text-green-500 text-sm">📈</span>} title={tr('tankDetail.sectionAdaptation')}>
-              <AdaptationSection data={state.adaptation} />
-            </SectionCard>
+            {/* 신뢰도/이상감지/적응상태(예측·baseline 트랙)는 급이 철학과 무관하고
+               promote 미배선으로 상시 0% — 정확도 지표로 대체, 표시 제거 (2026-07-21).
+               백엔드 데이터·컴포넌트는 유지(재도입 대비). */}
             <SectionCard icon={<Cpu className="w-4 h-4 text-green-500" />} title={tr('tankDetail.sectionAutonomousMode')}>
-              <AutonomousSection data={state.autonomous} />
+              <AutonomousSection
+                data={state.autonomous}
+                convergence={state.convergence}
+                tankId={tankId}
+                onChanged={() => load(true)}
+              />
             </SectionCard>
             <SectionCard icon={<span className="text-green-500 text-sm">🔀</span>} title={tr('tankDetail.sectionDecisions')}>
               <DecisionsSection data={state.decisions} />

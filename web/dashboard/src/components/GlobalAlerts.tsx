@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
+import { dateLocale } from '../lib/format';
 import { Alerts } from '../lib/api';
 import type { AlertOpen } from '../lib/types';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 // GlobalAlerts — 헤더 아래 전역 알림 banner.
 // open_alerts 5초 polling. 알림 0건이면 hidden. severity 별 색.
@@ -70,7 +71,7 @@ export function GlobalAlerts() {
               <span className="font-semibold uppercase tracking-wide mr-2">{label}</span>
               <span>{a.message}</span>
               <span className="ml-3 text-xs opacity-70 font-mono">
-                {a.subject?.kind}:{a.subject?.id} · {new Date(a.raised_at).toLocaleTimeString('ko-KR')}
+                {a.subject?.kind}:{a.subject?.id} · {new Date(a.raised_at).toLocaleTimeString(dateLocale())}
               </span>
             </div>
             <button

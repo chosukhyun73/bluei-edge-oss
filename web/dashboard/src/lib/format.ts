@@ -1,4 +1,4 @@
-import { t } from './i18n';
+import { t, getActiveLanguage } from './i18n';
 
 export function relativeTime(iso: string | undefined): string {
   if (!iso) return '—';
@@ -143,4 +143,43 @@ export function safetyGateMessage(rejectionReason: string): string {
     return t('format.gateSensorStale', { metric });
   }
   return t('format.gateRejected', { body });
+}
+
+// ── 날짜/시각 로케일 ─────────────────────────────────────────────────────────
+
+/** 활성 언어의 날짜/시각 로케일 — 'ko-KR' 하드코딩 대체 (2026-07-20 영어모드 오전/오후 누수 fix). */
+export function dateLocale(): string {
+  return getActiveLanguage() === 'ko' ? 'ko-KR' : 'en-US';
+}
+
+// ── 자동 수온제어 판단 문장 현지화 ───────────────────────────────────────────
+// Backend(internal/optimize/temp.go rationale, internal/tempcontrol/worker.go reason)는
+// 한국어 문장을 생성하지만 구조 필드(action/현재/목표 등)도 함께 준다. 구조 필드로
+// 같은 문장을 재구성해 현지화하고, 필드가 부족하면 원문(fallback)을 그대로 반환한다.
+// safetyGateMessage 와 같은 frontend 파생 패턴 — backend 는 변경하지 않는다.
+export function tempRationale(
+  action: string,
+  currentC: number | undefined,
+  targetC: number | undefined,
+  fallback: string,
+  doConstrained?: boolean,
+  currentDO?: number,
+  doFloor?: number,
+): string {
+  if (typeof currentC !== 'number' || typeof targetC !== 'number') return fallback;
+  // DO 제약 문장인데 수치가 없으면 재구성 대신 원문 유지(정보 손실 방지).
+  if (doConstrained && (typeof currentDO !== 'number' || typeof doFloor !== 'number')) return fallback;
+  const cur = currentC.toFixed(1);
+  const target = targetC.toFixed(1);
+  let s: string;
+  switch (action) {
+    case 'cool': s = t('format.tempRatCool', { cur, target }); break;
+    case 'allow_rise': s = t('format.tempRatAllowRise', { cur, target }); break;
+    case 'hold': s = t('format.tempRatHold', { target }); break;
+    default: return fallback;
+  }
+  if (doConstrained) {
+    s += t('format.tempRatDoSuffix', { do: currentDO!.toFixed(1), floor: doFloor!.toFixed(1) });
+  }
+  return s;
 }

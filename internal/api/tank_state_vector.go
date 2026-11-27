@@ -33,6 +33,7 @@ type TankStateVector struct {
 	Feeding           FeedingState      `json:"feeding"`
 	BiologicalContext BiologicalContext `json:"biological_context"`
 	Confidence        ConfidenceState   `json:"confidence"`
+	Convergence       ConvergenceState  `json:"convergence"` // AI↔운영자 격차 수렴 지표 (2026-07-21)
 	Anomaly           AnomalyState      `json:"anomaly"`
 	Adaptation        AdaptationState   `json:"adaptation"`
 	Autonomous        AutonomousState   `json:"autonomous"`
@@ -142,11 +143,12 @@ type EquipmentState struct {
 }
 
 type DeviceSummary struct {
-	DeviceID   string `json:"device_id"`
-	DeviceType string `json:"device_type"`
-	Status     string `json:"status"`
-	Quality    string `json:"quality"`
-	LastSeenAt string `json:"last_seen_at,omitempty"`
+	DeviceID   string         `json:"device_id"`
+	DeviceType string         `json:"device_type"`
+	Status     string         `json:"status"`
+	Quality    string         `json:"quality"`
+	LastSeenAt string         `json:"last_seen_at,omitempty"`
+	Details    map[string]any `json:"details,omitempty"` // 장비별 부가값(예: 냉각기 power_kw/current_a/running)
 }
 
 // FeedingState — 오늘 / 최근 / 추정 FCR.
@@ -218,7 +220,7 @@ func (s *Server) handleTankStateVector(w http.ResponseWriter, r *http.Request) {
 			"expected /v1/tanks/{tank_id}/state-vector", "")
 		return
 	}
-	v, err := s.buildTankStateVector(r, tankID)
+	v, err := s.buildTankStateVectorCached(r, tankID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "STORAGE_ERROR", err.Error(), "")
 		return
@@ -249,7 +251,7 @@ func (s *Server) buildTankStateVector(r *http.Request, tankID string) (*TankStat
 		name string
 		dur  time.Duration
 	}
-	results := make(chan stageResult, 10)
+	results := make(chan stageResult, 11)
 	runStage := func(name string, fn func()) {
 		t0 := time.Now()
 		fn()
@@ -258,7 +260,7 @@ func (s *Server) buildTankStateVector(r *http.Request, tankID string) (*TankStat
 
 	overallStart := time.Now()
 	var wg sync.WaitGroup
-	wg.Add(10)
+	wg.Add(11)
 	go func() { defer wg.Done(); runStage("fish", func() { v.Fish = s.collectFishState(rSub, tankID) }) }()
 	go func() { defer wg.Done(); runStage("water", func() { v.Water = s.collectWaterState(rSub, tankID) }) }()
 	go func() {
@@ -293,11 +295,15 @@ func (s *Server) buildTankStateVector(r *http.Request, tankID string) (*TankStat
 		defer wg.Done()
 		runStage("decisions", func() { v.Decisions = s.collectDecisionState(rSub, tankID) })
 	}()
+	go func() {
+		defer wg.Done()
+		runStage("convergence", func() { v.Convergence = s.collectConvergenceState(rSub, tankID) })
+	}()
 	wg.Wait()
 	close(results)
 
 	// 진단 로깅 — 느린 collect 식별. 1초 초과 collect 가 있으면 WARN.
-	timings := make(map[string]int64, 10)
+	timings := make(map[string]int64, 11)
 	var slowest string
 	var slowestMs int64
 	for r := range results {
@@ -547,6 +553,9 @@ func (s *Server) collectEquipmentState(r *http.Request, tankID string) Equipment
 			Quality:    stringValue(d["quality"]),
 			LastSeenAt: stringValue(d["last_seen_at"]),
 		}
+		if dm, ok := d["details"].(map[string]any); ok {
+			summary.Details = dm
+		}
 		out.Devices = append(out.Devices, summary)
 		switch summary.Status {
 		case "online":
@@ -617,9 +626,15 @@ func (s *Server) collectBiologicalContext(r *http.Request, tankID string) Biolog
 		out.Source = "lifecycle"
 		out.Species = lc.Species
 		out.GrowthStage = lc.GrowthStage
-		out.FishCount = lc.InitialCount
+		// 현재 마리수·중량·biomass = 정본 파생값(tank_profiles). tank_profiles.fish_count 은
+		// 입식−누적폐사로 재동기(startup)·폐사기록 시 유지되는 단일 소스 — 여기서 재계산하지 않는다.
+		out.FishCount = lc.InitialCount // 프로파일 없을 때 fallback
 		out.AvgWeightG = lc.InitialAvgWeightG
-		out.BiomassKg = float64(lc.InitialCount) * lc.InitialAvgWeightG / 1000.0
+		if tp, terr := s.store.GetTankProfile(r.Context(), tankID); terr == nil && tp != nil {
+			out.FishCount = tp.FishCount
+			out.AvgWeightG = tp.AvgWeightG
+		}
+		out.BiomassKg = float64(out.FishCount) * out.AvgWeightG / 1000.0
 		out.StockingID = lc.ActiveStockingID
 		out.StockedAt = fmtAPITime(lc.StockedAt)
 		days := int(time.Since(lc.StockedAt).Hours() / 24)

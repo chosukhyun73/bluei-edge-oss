@@ -1,6 +1,6 @@
 import type { StateVector } from '../../lib/types';
 import { relativeTime } from '../../lib/format';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 type Props = { data?: StateVector['feeding'] };
 

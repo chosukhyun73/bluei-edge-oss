@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Disputes } from '../../lib/api';
 import { DISPUTE_TYPE_LABELS } from '../../lib/format';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 import { Button } from '../ui/button';
 
 // C-3l: 운영자 이의제기 입력 모달.

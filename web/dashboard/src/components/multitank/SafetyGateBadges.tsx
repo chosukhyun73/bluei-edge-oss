@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { SafetyGates } from '../../lib/api';
 import type { SafetyGatesStatus, SafetyGateStatus } from '../../lib/types';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 // C-5: 신규 사이클 시작 폼에 띄우는 안전 게이트 3종 배지.
 // 운영자가 의도 메모를 입력하는 동안 "지금 어떤 안전 규칙이 살아 있나" 확인.

@@ -4,8 +4,9 @@ package site
 type SiteType string
 
 const (
-	TypeLand   SiteType = "land"
-	TypeMarine SiteType = "marine"
+	TypeLand       SiteType = "land"
+	TypeMarine     SiteType = "marine"
+	TypeProcessing SiteType = "processing" // 가공공장 (docs/54)
 )
 
 // LandLocation is the address + optional fixed coordinates for a land site.

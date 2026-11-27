@@ -2,7 +2,7 @@
 # bluei-edge systemd 빠른 등록 (현 위치 in-place). ★ 루트로 실행:
 #     sudo bash scripts/install-systemd-quick.sh
 #
-# 현재 프로젝트 위치/바이너리/config(edge.empty.yaml) 를 그대로 구동하는 system 서비스를 만든다.
+# 현재 프로젝트 위치/바이너리/config(edge.example.yaml) 를 그대로 구동하는 system 서비스를 만든다.
 #   - 부팅 자동기동 (WantedBy=multi-user.target)
 #   - 크래시/비정상 종료 시 자동 재시작 (Restart=on-failure, 5s)
 #   - 종료 시 SIGTERM + 20s 유예 → 기존 graceful 종료 경로
@@ -16,7 +16,6 @@ set -euo pipefail
 
 ROOT=/home/bluei/projects/bluei-edge
 RUN_USER=bluei
-TOKEN="${BLUEI_EDGE_OPERATOR_TOKEN:-qrbqWR8mEJgYTJmwwBFVa55HMImJG1TwAdJn1S1uFl4}"
 UNIT=/etc/systemd/system/bluei-edge.service
 ENV_DIR=/etc/bluei-edge
 ENV_FILE="$ENV_DIR/env"
@@ -28,6 +27,17 @@ fi
 if [ ! -x "$ROOT/bin/bluei-edge" ]; then
   echo "바이너리 없음: $ROOT/bin/bluei-edge — 먼저 빌드(go build -o bin/bluei-edge ./cmd/bluei-edge)" >&2
   exit 2
+fi
+
+# 운영자 토큰: 환경변수 > 기존 env 파일 값(재실행해도 ESP32 등 기존 장비 설정 유지) > 새 무작위 생성.
+# 저장소에 기본 토큰을 두지 않는다(공개 저장소 유출 방지).
+TOKEN="${BLUEI_EDGE_OPERATOR_TOKEN:-}"
+if [ -z "$TOKEN" ] && [ -f "$ENV_FILE" ]; then
+  TOKEN="$(sed -n 's/^BLUEI_EDGE_OPERATOR_TOKEN=//p' "$ENV_FILE" | head -1)"
+fi
+if [ -z "$TOKEN" ]; then
+  TOKEN="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p | tr -d '\n')"
+  echo "→ 새 운영자 토큰 생성 — 값은 $ENV_FILE 에서 확인 (ESP32 secrets.h 에 같은 값 설정)"
 fi
 
 echo "[1/6] 운영자 토큰 env 파일 작성: $ENV_FILE (600)"
@@ -49,7 +59,7 @@ Type=simple
 User=$RUN_USER
 WorkingDirectory=$ROOT
 EnvironmentFile=$ENV_FILE
-ExecStart=$ROOT/bin/bluei-edge run -config configs/edge.empty.yaml
+ExecStart=$ROOT/bin/bluei-edge run -config configs/edge.example.yaml
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20s

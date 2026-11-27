@@ -1,5 +1,7 @@
-// 현재 언어 상태 + 전환 + localStorage 영속. App 전역에서 useLanguage() 로 접근.
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+// 현재 언어 상태 + 전환 + localStorage 영속. 접근은 lib/language-core 의 useLanguage().
+// 이 파일은 컴포넌트(LanguageProvider)만 export — Fast Refresh 경계 유지
+// (훅과 혼합 export 금지, language-core.ts 헤더 참조).
+import { useCallback, useState, type ReactNode } from 'react';
 import {
   type AppLanguage,
   type TrVars,
@@ -8,6 +10,7 @@ import {
   setActiveLanguage,
   tr as trBase,
 } from './i18n';
+import { LanguageContext, type LanguageContextValue } from './language-core';
 
 const STORAGE_KEY = 'bluei_edge_lang';
 
@@ -20,15 +23,6 @@ function readStored(): AppLanguage {
   }
   return DEFAULT_LANGUAGE;
 }
-
-interface LanguageContextValue {
-  lang: AppLanguage;
-  setLang: (l: AppLanguage) => void;
-  /// 현재 언어로 바인딩된 tr — tr('header.title'), tr('x.y', { count: 3 }) 처럼 쓴다.
-  tr: (key: string, vars?: TrVars) => string;
-}
-
-const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<AppLanguage>(readStored);
@@ -47,15 +41,6 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   const tr = useCallback((key: string, vars?: TrVars) => trBase(key, lang, vars), [lang]);
 
-  return (
-    <LanguageContext.Provider value={{ lang, setLang, tr }}>
-      {children}
-    </LanguageContext.Provider>
-  );
-}
-
-export function useLanguage(): LanguageContextValue {
-  const ctx = useContext(LanguageContext);
-  if (!ctx) throw new Error('useLanguage must be used within LanguageProvider');
-  return ctx;
+  const value: LanguageContextValue = { lang, setLang, tr };
+  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 }

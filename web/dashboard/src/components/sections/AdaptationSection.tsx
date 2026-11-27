@@ -1,4 +1,4 @@
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 import type { StateVector } from '../../lib/types';
 
 type Props = { data?: StateVector['adaptation'] };

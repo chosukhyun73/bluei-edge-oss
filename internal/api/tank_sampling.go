@@ -59,6 +59,7 @@ type tankSamplingRequest struct {
 	StdWeightG    float64 `json:"std_weight_g"`
 	MinWeightG    float64 `json:"min_weight_g"`
 	MaxWeightG    float64 `json:"max_weight_g"`
+	AvgLengthCm   float64 `json:"avg_length_cm"`
 	HealthScore   int     `json:"health_score"`
 	HealthNotes   string  `json:"health_notes"`
 	AbnormalCount int     `json:"abnormal_count"`
@@ -135,6 +136,7 @@ func (s *Server) handlePostSampling(w http.ResponseWriter, r *http.Request, tank
 		StdWeightG:    req.StdWeightG,
 		MinWeightG:    req.MinWeightG,
 		MaxWeightG:    req.MaxWeightG,
+		AvgLengthCm:   req.AvgLengthCm,
 		HealthScore:   req.HealthScore,
 		HealthNotes:   req.HealthNotes,
 		AbnormalCount: req.AbnormalCount,
@@ -178,6 +180,10 @@ func (s *Server) handlePostSampling(w http.ResponseWriter, r *http.Request, tank
 	if req.MaxWeightG > 0 {
 		v := req.MaxWeightG
 		proj.MaxWeightG = &v
+	}
+	if req.AvgLengthCm > 0 {
+		v := req.AvgLengthCm
+		proj.AvgLengthCm = &v
 	}
 	if req.HealthScore != 0 {
 		v := req.HealthScore
@@ -351,6 +357,9 @@ func samplingToMap(ts *storage.TankSampling) map[string]any {
 	}
 	if ts.MaxWeightG != nil {
 		m["max_weight_g"] = *ts.MaxWeightG
+	}
+	if ts.AvgLengthCm != nil {
+		m["avg_length_cm"] = *ts.AvgLengthCm
 	}
 	if ts.HealthScore != nil {
 		m["health_score"] = *ts.HealthScore

@@ -30,7 +30,7 @@ func newCalibratorTestStore(t *testing.T) storage.Store {
 		"001_init.sql",
 		"002_autonomous_mode.sql",
 		"003_lifecycle.sql",
-		"004_sampling.sql",
+		"004_sampling.sql", "041_sampling_length.sql",
 		"005_fcr_calibration.sql",
 		"030_traceability_lifecycle.sql",
 	} {

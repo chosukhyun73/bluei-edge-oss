@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,8 @@ import (
 
 type sqliteStore struct {
 	db *sql.DB
+	// WAL 정리 워커 중단용 (wal_maintenance.go). Close 에서 호출.
+	stopMaint context.CancelFunc
 }
 
 // Open opens (or creates) the SQLite database at path and applies PRAGMAs.
@@ -35,7 +38,11 @@ func Open(path string) (Store, error) {
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=foreign_keys(ON)" +
 		"&_pragma=busy_timeout(5000)" +
-		"&_pragma=temp_store(MEMORY)"
+		"&_pragma=temp_store(MEMORY)" +
+		// journal_size_limit — checkpoint 후 WAL 파일을 이 크기로 잘라낸다.
+		// 없으면 한 번 커진 WAL 파일이 디스크에서 절대 줄지 않는다(10-01: 3.2GB).
+		// 64MB = 평상시 쓰기량을 흡수하면서 읽기 성능을 해치지 않는 선.
+		"&_pragma=journal_size_limit(67108864)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -58,7 +65,12 @@ func Open(path string) (Store, error) {
 		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
 
-	return &sqliteStore{db: db}, nil
+	st := &sqliteStore{db: db}
+	// WAL 이 무한히 자라는 것을 막는다 (10-01 사고: 3.2GB → 조회 400배 지연).
+	maintCtx, cancel := context.WithCancel(context.Background())
+	st.stopMaint = cancel
+	StartWALMaintenance(maintCtx, db, path, slog.Default())
+	return st, nil
 }
 
 // Migrate reads and executes the SQL migration file.
@@ -100,7 +112,12 @@ func Migrate(s Store, sqlPath string) error {
 	return nil
 }
 
-func (s *sqliteStore) Close() error { return s.db.Close() }
+func (s *sqliteStore) Close() error {
+	if s.stopMaint != nil {
+		s.stopMaint()
+	}
+	return s.db.Close()
+}
 
 func (s *sqliteStore) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
@@ -122,6 +139,24 @@ func (s *sqliteStore) KVSet(ctx context.Context, key, value string) error {
          ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
 		key, value, fmtNow())
 	return err
+}
+
+// KVListPrefix returns all runtime_kv rows whose key starts with prefix.
+func (s *sqliteStore) KVListPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key,value FROM runtime_kv WHERE key LIKE ?`, prefix+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
 }
 
 // Device status ---

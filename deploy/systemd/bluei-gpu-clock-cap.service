@@ -1,0 +1,23 @@
+[Unit]
+# GB10 은 장시간 고부하로 기판이 ~95°C 에 닿으면 로그 없이 전원이 끊기고, 다시 켜도
+# 클럭이 500~700MHz 에 묶일 수 있다(전원 완전 차단 60초로만 풀림). 클럭 상한으로 예방.
+# 메모리 대역폭이 병목이라 LLM 속도 손실은 작다. 참고: github.com/maci0/gb10-thermal-toolkit
+# 상한 바꾸기: /etc/bluei-edge/env 에 GPU_CLOCK_CAP_MHZ=2000 → systemctl restart bluei-gpu-clock-cap
+Description=bluei-edge GB10 GPU clock cap (thermal power-off prevention)
+After=nvidia-persistenced.service systemd-modules-load.service
+Wants=nvidia-persistenced.service
+ConditionPathExists=/usr/bin/nvidia-smi
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=GPU_CLOCK_CAP_MHZ=2100
+EnvironmentFile=-/etc/bluei-edge/env
+ExecStartPre=/usr/bin/nvidia-smi -pm 1
+ExecStart=/usr/bin/nvidia-smi -lgc 0,${GPU_CLOCK_CAP_MHZ}
+ExecStop=/usr/bin/nvidia-smi -rgc
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,50 +1,69 @@
-import { useState, useMemo, memo } from 'react';
-import { VideoOff } from 'lucide-react';
-import { Cameras } from '../lib/api';
+import { memo } from 'react';
+import { VideoOff, Maximize2 } from 'lucide-react';
 import type { Camera, Tank } from '../lib/types';
 import { FeedQuickControl } from './multitank/FeedQuickControl';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
+import { useSnapshotPoll } from '../lib/use-snapshot-poll';
 
 interface Props {
   camera: Camera;
   tank?: Tank;          // 매핑된 수조 — 사료 quick 컨트롤용
+  onExpand?: () => void; // 영상 클릭 시 단독 확대 뷰 열기
 }
 
-// verified 카메라만 MJPEG 스트림 마운트 — GStreamer 오류 시 offline placeholder 로 자동 전환.
-// memo + useMemo 로 부모 polling re-render 가 stream 을 reset 하지 않게 안정화.
-function CameraTileImpl({ camera, tank }: Props) {
+// verified 카메라만 라이브 스트림 표시 — snapshot 폴링(useSnapshotPoll)으로 최신 프레임을
+// 주기 갱신한다. MJPEG 지속연결을 쓰지 않으므로 다중 타일에서도 브라우저 연결 풀을 점유/누수하지
+// 않는다. 일시 실패 시 자동 재시도(placeholder 표시)로 라이브를 유지한다.
+// memo 로 부모 polling re-render 가 stream 을 reset 하지 않게 안정화.
+function CameraTileImpl({ camera, tank, onExpand }: Props) {
   const { tr } = useLanguage();
-  const [error, setError] = useState(false);
-  const isLive = camera.status === 'verified' && !error;
+  const verified = camera.status === 'verified';
+  const { online, canvasRef } = useSnapshotPoll(camera.camera_id, verified, {
+    intervalMs: 200, // 5fps 그리드 표시 — 짧은 단발요청이라 연결을 점유하지 않아 프리즈 안전
+  });
+  const isLive = verified && online;
 
-  // mount 시점 cacheBust 한 번만 — re-render 시 URL 변경 X (stream 유지)
-  const src = useMemo(
-    () => Cameras.mjpegURL(camera.camera_id, 'sub'),
-    [camera.camera_id],
-  );
+  // 크롭된 탑뷰는 세로로 긴(≈2:3) 프레임 → 타일도 세로 비율로 두고 object-contain 으로
+  // 전체 높이를 잘림 없이 표시. 미크롭(수중/전체 탑뷰)은 4:3.
+  const meta = camera.metadata as Record<string, unknown> | undefined;
+  const cropped = !!meta && ((Number(meta.crop_left) || 0) > 0 || (Number(meta.crop_right) || 0) > 0);
+  const padBottom = cropped ? '150%' : '75%';
 
   return (
     <div className="relative rounded-lg overflow-hidden bg-gray-900 border border-gray-700/40 group">
-      {/* 16:9 aspect ratio wrapper */}
-      <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
-        {isLive ? (
-          <img
-            src={src}
-            alt={camera.display_name}
-            className="absolute inset-0 w-full h-full object-cover"
-            onError={() => setError(true)}
-          />
+      {/* 16:9 aspect ratio wrapper — live 일 때 클릭하면 단독 확대 뷰 */}
+      <div
+        className={`relative w-full bg-black ${verified && onExpand ? 'cursor-pointer' : ''}`}
+        style={{ paddingBottom: padBottom }}
+        onClick={verified && onExpand ? onExpand : undefined}
+      >
+        {verified ? (
+          <>
+            {/* 스냅샷 폴링 — 훅이 blob→ImageBitmap 을 canvas 에 직접 그림(WebKit 이미지캐시 우회). */}
+            <canvas
+              ref={canvasRef}
+              aria-label={camera.display_name}
+              className={`absolute inset-0 w-full h-full object-contain transition-opacity ${
+                online ? 'opacity-100' : 'opacity-0'
+              }`}
+            />
+            {/* 최초 로딩 / 일시 연결 실패 — 회색 플레이스홀더(폴링은 계속 재시도 중) */}
+            {!online && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gray-800/80">
+                <VideoOff className="w-6 h-6 text-gray-600" />
+                <span className="text-xs text-gray-500 font-mono">{tr('cameraTile.offline')}</span>
+              </div>
+            )}
+          </>
         ) : (
-          /* 오프라인 / unverified / GStreamer 없음 — 회색 플레이스홀더 */
+          /* unverified — 회색 플레이스홀더 */
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gray-800/80">
             <VideoOff className="w-6 h-6 text-gray-600" />
-            <span className="text-xs text-gray-500 font-mono">
-              {camera.status !== 'verified' ? tr('cameraTile.unverified') : tr('cameraTile.offline')}
-            </span>
+            <span className="text-xs text-gray-500 font-mono">{tr('cameraTile.unverified')}</span>
           </div>
         )}
 
-        {/* LIVE 펄스 — verified 이고 에러 없을 때만 */}
+        {/* LIVE 펄스 — verified 이고 스냅샷 수신 중일 때만 */}
         {isLive && (
           <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/60 rounded px-1.5 py-0.5">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
@@ -66,6 +85,13 @@ function CameraTileImpl({ camera, tank }: Props) {
             {camera.status}
           </span>
         </div>
+
+        {/* 확대 힌트 — verified 이고 클릭 가능할 때 hover 시 표시 */}
+        {verified && onExpand && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 opacity-0 group-hover:opacity-100 transition-all pointer-events-none">
+            <Maximize2 className="w-7 h-7 text-white/90 drop-shadow" />
+          </div>
+        )}
       </div>
 
       {/* 캡션 — 카메라 이름 + 사료 시작/멈춤 토글 */}

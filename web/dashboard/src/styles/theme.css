@@ -1,5 +1,13 @@
 @custom-variant dark (&:is(.dark *));
 
+/* 초광폭 브레이크포인트 — Tailwind 기본은 2xl(96rem)이 끝이라 4K 모니터에
+   대응할 단계가 없다. 1920 이상에서 레이아웃을 2레인으로 재배치한다.
+   ⚠ 단위는 반드시 rem. px 로 쓰면 기본 브레이크포인트(rem)와 정렬이 깨져
+   미디어쿼리가 lg/xl 보다 앞에 출력되고, 3xl 규칙이 조용히 덮어써진다. */
+@theme {
+  --breakpoint-3xl: 120rem; /* 1920px */
+}
+
 :root {
   --font-size: 16px;
   --background: #000000;

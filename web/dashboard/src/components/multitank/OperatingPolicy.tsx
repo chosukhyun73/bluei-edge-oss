@@ -1,23 +1,26 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { Settings, AlertTriangle, RotateCcw } from 'lucide-react';
+import { dateLocale } from '../../lib/format';
+import { Settings, AlertTriangle, ExternalLink } from 'lucide-react';
 import { Groups } from '../../lib/api';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 import type { Group, Tank } from '../../lib/types';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
-import {
-  type BsfMode, BSF_MODE_LABEL,
-  computeFeedingPolicy,
-  DENSITY_STATUS_LABEL, DENSITY_STATUS_COLOR,
-  MAX_DAILY_CYCLES,
-} from '../../lib/species-policy';
-import type { GroupPolicy, OperatingMode } from '../../lib/feeding-policy-store';
+import { type BsfMode, BSF_MODE_LABEL, computeFeedingPolicy, DENSITY_STATUS_LABEL, DENSITY_STATUS_COLOR, MAX_DAILY_CYCLES, feedingWeightG } from '../../lib/species-policy';
+import { useLiveTemps } from '../../lib/use-live-temps';
+import type { GroupPolicy } from '../../lib/feeding-policy-store';
 import {
   OPERATING_MODE_LABEL, DEFAULT_OPERATING_MODE,
   getGroupPolicy, setGroupPolicy,
-  getEffectiveTankPolicy, setTankOverride, clearTankOverride,
+  getEffectiveTankPolicy, mergeTankOverride,
   ensureLoaded as ensurePolicyLoaded,
 } from '../../lib/feeding-policy-store';
+
+// 사료공급 탭으로 이동 (MultiTankOperations 가 수신).
+// 운영 모드의 정본은 수조별 설정(사료공급 탭) — 이 페이지는 상황판 역할 (2026-07-08 운영자 확정).
+function gotoFeedTab(): void {
+  window.dispatchEvent(new CustomEvent('bluei:goto-subtab', { detail: 'feed' }));
+}
 
 const MODES: BsfMode[] = ['aggressive', 'standard', 'conservative'];
 
@@ -60,14 +63,15 @@ function fmtHours(h: number | null, tr: (k: string, v?: Record<string, string | 
 
 function fmtNumber(n: number | null, digits = 0): string {
   if (n == null) return '—';
-  return n.toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return n.toLocaleString(dateLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
 function TankPolicyCard({
-  tank, group, onChanged,
+  tank, group, liveTempC, onChanged,
 }: {
   tank: Tank;
   group: Group | null;
+  liveTempC: number | null; // 실측 수온 (없으면 null → fallback)
   onChanged: () => void;
 }) {
   const { tr } = useLanguage();
@@ -75,24 +79,17 @@ function TankPolicyCard({
   const computation = useMemo(() => computeFeedingPolicy({
     species: tank.species,
     fish_count: tank.fish_count ?? null,
-    avg_weight_g: tank.avg_weight_g ?? null,
+    avg_weight_g: feedingWeightG(tank),
     volume_m3: tank.volume_m3 ?? null,
     bsf_mode: effective.bsf_mode,
-    temperature_c: null, // 본선 sensor 미연결 → fallback 14℃
+    temperature_c: liveTempC, // 실측 수온(사료공급 탭과 동일 소스). null → fallback
     max_daily_cycles: effective.max_daily_cycles,
-  }), [tank, effective.bsf_mode, effective.max_daily_cycles]);
+    daily_cycles: effective.daily_cycles,
+  }), [tank, effective.bsf_mode, effective.max_daily_cycles, liveTempC]);
 
-  function handleOverrideChange(m: BsfMode) {
-    if (m === effective.group_default.bsf_mode) {
-      clearTankOverride(tank.tank_id);
-    } else {
-      setTankOverride(tank.tank_id, { bsf_mode: m });
-    }
-    onChanged();
-  }
-
-  function handleClearOverride() {
-    clearTankOverride(tank.tank_id);
+  // BSF 는 수조 전용 설정 — 항상 수조에 명시적으로 기록 (그룹 상속/해제 개념 제거, 2026-07-08).
+  function handleBsfChange(m: BsfMode) {
+    mergeTankOverride(tank.tank_id, { bsf_mode: m });
     onChanged();
   }
 
@@ -118,20 +115,9 @@ function TankPolicyCard({
           <span className="text-xs text-gray-400">{tr('operatingPolicy.policy')}</span>
           <ModeRadio
             value={effective.bsf_mode}
-            onChange={handleOverrideChange}
+            onChange={handleBsfChange}
             size="sm"
           />
-          {effective.is_override && (
-            <button
-              type="button"
-              onClick={handleClearOverride}
-              className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-gray-700 text-gray-400 hover:text-white"
-              title={tr('operatingPolicy.resetToGroupDefault')}
-            >
-              <RotateCcw className="w-3 h-3" />
-              {tr('operatingPolicy.groupDefault')}
-            </button>
-          )}
         </div>
       </div>
 
@@ -141,11 +127,14 @@ function TankPolicyCard({
             {tr(OPERATING_MODE_LABEL[effective.operating_mode])}
           </span>
         </span>
-        {effective.is_override && (
-          <span className="text-amber-300 font-mono">
-            override · {tr('operatingPolicy.groupDefaultBsf')} = {tr(BSF_MODE_LABEL[effective.group_default.bsf_mode])}
-          </span>
-        )}
+        <button
+          type="button"
+          onClick={gotoFeedTab}
+          className="inline-flex items-center gap-1 text-gray-500 hover:text-white underline underline-offset-2"
+        >
+          <ExternalLink className="w-3 h-3" />
+          {tr('operatingPolicy.changeInFeedTab')}
+        </button>
       </div>
 
       {/* 입식 + 밀도 */}
@@ -254,12 +243,19 @@ export function OperatingPolicy() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const liveTemps = useLiveTemps(); // 실측 수온 (사료공급 탭과 동일 소스, 60초 갱신)
 
   // 그룹 정책 — refreshKey 변경 시 재조회.
   const [groupPolicy, setGroupPolicyState] = useState<GroupPolicy>({
     bsf_mode: 'standard',
     max_daily_cycles: MAX_DAILY_CYCLES,
+    daily_cycles: 0, // 0 = 자동 산출 (feeding-policy-store 기본값과 동일)
     operating_mode: DEFAULT_OPERATING_MODE,
+    photoperiod_start_min: 9 * 60,
+    photoperiod_end_min: 17 * 60,
+    feeder_run_sec: 2,
+    feeder_stop_sec: 6,
+    feeder_spinup_sec: 11,          // 공급모터 리드 (feeding-policy-store 기본값과 동일)
   });
 
   useEffect(() => {
@@ -308,22 +304,36 @@ export function OperatingPolicy() {
     void reload();
   }, [reload]);
 
-  function handleGroupModeChange(m: BsfMode) {
-    if (!selectedGroupId) return;
-    setGroupPolicy(selectedGroupId, { bsf_mode: m });
-    setGroupPolicyState(prev => ({ ...prev, bsf_mode: m }));
-    setRefreshKey(k => k + 1);
-  }
-
-  function handleGroupOperatingModeChange(m: OperatingMode) {
-    if (!selectedGroupId) return;
-    setGroupPolicy(selectedGroupId, { operating_mode: m });
-    setGroupPolicyState(prev => ({ ...prev, operating_mode: m }));
-    setRefreshKey(k => k + 1);
-  }
-
   const selectedGroup = groups.find(g => g.group_id === selectedGroupId) ?? null;
   const tanks = tanksByGroup.get(selectedGroupId) ?? [];
+
+  // BSF 일괄 적용 — 그룹은 "숨은 기본값 계층"이 아니라 명시적 도장 도구 (2026-07-08 운영자 확정).
+  const [bulkBsf, setBulkBsf] = useState<BsfMode>('standard');
+
+  function handleBulkBsfApply() {
+    if (tanks.length === 0) return;
+    if (!window.confirm(tr('operatingPolicy.bulkConfirm', {
+      n: tanks.length, mode: tr(BSF_MODE_LABEL[bulkBsf]),
+    }))) return;
+    for (const t of tanks) {
+      mergeTankOverride(t.tank_id, { bsf_mode: bulkBsf });
+    }
+    // 그룹 default 도 같은 값으로 — 이후 신규 수조의 초기값 (UI 에는 노출 안 함).
+    if (selectedGroupId) setGroupPolicy(selectedGroupId, { bsf_mode: bulkBsf });
+    setRefreshKey(k => k + 1);
+  }
+
+  // 운영 모드 요약 — 정본은 수조별 설정 (사료공급 탭). 여기는 읽기 전용 상황판.
+  const modeCounts = useMemo(() => {
+    let auto = 0, manual = 0;
+    for (const t of tanks) {
+      const eff = getEffectiveTankPolicy(t.tank_id, selectedGroupId);
+      if (eff.operating_mode === 'auto') auto++;
+      else manual++;
+    }
+    return { auto, manual };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tanks, selectedGroupId, refreshKey]);
 
   return (
     <Card>
@@ -363,27 +373,36 @@ export function OperatingPolicy() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <label className="text-xs text-gray-400">{tr('operatingPolicy.groupBsfPolicy')}</label>
-                <ModeRadio value={groupPolicy.bsf_mode} onChange={handleGroupModeChange} />
+                <label className="text-xs text-gray-400">{tr('operatingPolicy.bulkBsf')}</label>
+                <div className="flex items-center gap-2">
+                  <ModeRadio value={bulkBsf} onChange={setBulkBsf} />
+                  <button
+                    type="button"
+                    onClick={handleBulkBsfApply}
+                    disabled={tanks.length === 0}
+                    className="px-3 py-1 text-sm rounded border border-gray-600 text-gray-300 hover:text-white hover:border-gray-400 disabled:opacity-40"
+                  >
+                    {tr('operatingPolicy.bulkApplyBtn', { n: tanks.length })}
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-gray-400">{tr('operatingPolicy.operatingMode')}</label>
-                <div className="inline-flex gap-1">
-                  {(['auto', 'manual'] as OperatingMode[]).map(m => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => handleGroupOperatingModeChange(m)}
-                      className={
-                        groupPolicy.operating_mode === m
-                          ? 'px-3 py-1 text-sm rounded border bg-green-600/20 border-green-500/60 text-green-200'
-                          : 'px-3 py-1 text-sm rounded border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600'
-                      }
-                    >
-                      {tr(OPERATING_MODE_LABEL[m])}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2 h-8">
+                  <span className="text-sm font-mono">
+                    <span className="text-green-300">{tr('operatingPolicy.modeAutoCount', { n: modeCounts.auto })}</span>
+                    <span className="text-gray-600"> · </span>
+                    <span className="text-amber-300">{tr('operatingPolicy.modeManualCount', { n: modeCounts.manual })}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={gotoFeedTab}
+                    className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-white underline underline-offset-2"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    {tr('operatingPolicy.modePerTankNote')}
+                  </button>
                 </div>
               </div>
 
@@ -408,6 +427,7 @@ export function OperatingPolicy() {
                     key={t.tank_id}
                     tank={t}
                     group={selectedGroup}
+                    liveTempC={liveTemps[t.tank_id] ?? null}
                     onChanged={() => setRefreshKey(k => k + 1)}
                   />
                 ))}

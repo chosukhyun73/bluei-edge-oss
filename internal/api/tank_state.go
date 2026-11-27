@@ -47,6 +47,11 @@ func (s *Server) handleTankRoute(w http.ResponseWriter, r *http.Request) {
 		s.handleTankSamplingRoute(w, r)
 		return
 	}
+	// /fcr — 운영자 FCR 직접 입력 (POST) + 조회 (GET). 추정 평균중량 override.
+	if strings.HasSuffix(r.URL.Path, "/fcr") {
+		s.handleTankFCRRoute(w, r)
+		return
+	}
 	// /weight-projection — D-3 FCR 기반 평균 체중 추정
 	if strings.HasSuffix(r.URL.Path, "/weight-projection") {
 		s.handleTankWeightProjection(w, r)
@@ -60,6 +65,12 @@ func (s *Server) handleTankRoute(w http.ResponseWriter, r *http.Request) {
 	// /live-weight — B-8: tank 의 feeder controller UDP 잔량 (1Hz fresh)
 	if strings.HasSuffix(r.URL.Path, "/live-weight") {
 		s.handleTankLiveWeight(w, r)
+		return
+	}
+	// /hopper | /hopper/refill | /hopper/recalibrate — 호퍼 잔량 원장 (2026-07-17, 재보정 2026-07-28)
+	if strings.HasSuffix(r.URL.Path, "/hopper") || strings.HasSuffix(r.URL.Path, "/hopper/refill") ||
+		strings.HasSuffix(r.URL.Path, "/hopper/recalibrate") {
+		s.handleTankHopperRoute(w, r)
 		return
 	}
 	// /zero — 운영자 영점 버튼 (POST = set, DELETE = clear)

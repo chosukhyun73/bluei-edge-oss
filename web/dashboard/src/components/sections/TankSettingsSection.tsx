@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 import { Trash2, Plus, ChevronDown, ChevronRight, Fish } from 'lucide-react';
 import {
   Tanks, SensorDevices, Actuators, Cameras, CameraModels, SensorModels, ActuatorModels, WTGs, Controllers, ApiError,
@@ -9,7 +9,7 @@ import type {
   Tank, Sensor, Actuator, Camera, TankFormFactor,
   TankLifecycleResponse,
   NewSensorBody, NewCameraBody, NewWTGBody,
-  CameraModel, MountLocation, ViewAngle, CameraPurpose,
+  CameraModel, MountLocation, ViewAngle, CameraPurpose, CommonCameraArea,
   NewCameraModelBody, CameraLensType,
   SensorModel, NewSensorModelBody,
   MeasurementType, SensorMountLocation, MeasurementRole,
@@ -18,7 +18,7 @@ import type {
 } from '../../lib/types';
 import {
   MOUNT_LOCATION_LABELS, VIEW_ANGLE_LABELS, VIEW_ANGLE_AI_HINT,
-  CAMERA_PURPOSE_LABELS, CAMERA_PURPOSE_TOOLTIPS,
+  CAMERA_PURPOSE_LABELS, CAMERA_PURPOSE_TOOLTIPS, COMMON_CAMERA_AREA_OPTIONS,
   MEASUREMENT_TYPE_LABELS, MOUNT_LOCATION_SENSOR_LABELS,
   MEASUREMENT_ROLE_LABELS, MEASUREMENT_ROLE_TOOLTIPS,
   ACTUATOR_MOUNT_LOCATION_LABELS, SAFETY_ROLE_LABELS, SAFETY_ROLE_HINTS, OPERATING_MODE_LABELS,
@@ -1473,6 +1473,9 @@ export function InlineCameraForm({ tankId, onSaved, onCancel }: {
   const [heightFromWaterM, setHeightFromWaterM] = useState('');
   const [tiltDeg, setTiltDeg] = useState('');
   const [purpose, setPurpose] = useState<CameraPurpose[]>([]);
+  // 배치 구분 — 수조(이 탱크) vs 공통(수조 비종속: 수중·수처리·보안 등)
+  const [viewScope, setViewScope] = useState<'tank' | 'common'>('tank');
+  const [commonArea, setCommonArea] = useState<CommonCameraArea>('underwater');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -1627,6 +1630,11 @@ export function InlineCameraForm({ tankId, onSaved, onCancel }: {
       if (heightFromWaterM.trim()) body.height_from_water_m = Number(heightFromWaterM);
       if (tiltDeg.trim()) body.tilt_deg = Number(tiltDeg);
       if (purpose.length > 0) body.purpose = purpose;
+      // 배치 구분 — 공통 카메라는 metadata.view_scope/area 로 저장(마이그레이션 불필요).
+      // 그리드에서 수조 셀이 아니라 공통 영역(구역별)에 표시된다.
+      if (viewScope === 'common') {
+        body.metadata = { ...(body.metadata ?? {}), view_scope: 'common', area: commonArea };
+      }
       if (rtspPath.trim()) body.stream_profiles = { sub: { path: rtspPath.trim() } };
       // password 입력 시 password_secret_ref 는 backend 가 자동 채움. 입력 없으면 placeholder ref.
       if (!password) body.password_secret_ref = `secrets://camera_${trimmedId}`;
@@ -1872,6 +1880,42 @@ export function InlineCameraForm({ tankId, onSaved, onCancel }: {
             className="h-8 px-3 rounded-md border border-gray-700 bg-gray-900 text-sm text-white focus:outline-none focus:ring-2 focus:ring-green-500/50"
           />
         </div>
+      </div>
+
+      {/* 배치 구분 — 수조(이 탱크) vs 공통(수조 비종속: 수중·수처리·보안 등) */}
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs text-gray-400 font-medium">{tr('tankSettings.cameraScope')}</label>
+        <div className="flex gap-1.5">
+          {(['tank', 'common'] as const).map(s => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setViewScope(s)}
+              className={`px-3 py-1 rounded text-[11px] border transition-colors ${
+                viewScope === s
+                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
+                  : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'
+              }`}
+            >
+              {tr(s === 'tank' ? 'tankSettings.cameraScopeTank' : 'tankSettings.cameraScopeCommon')}
+            </button>
+          ))}
+        </div>
+        {viewScope === 'common' && (
+          <>
+            <label className="text-xs text-gray-400 font-medium mt-1">{tr('tankSettings.cameraArea')}</label>
+            <select
+              value={commonArea}
+              onChange={e => setCommonArea(e.target.value as CommonCameraArea)}
+              className="h-8 px-3 rounded-md border border-gray-700 bg-gray-900 text-sm text-white focus:outline-none focus:ring-2 focus:ring-green-500/50"
+            >
+              {COMMON_CAMERA_AREA_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{tr(o.label)}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-gray-500">{tr('tankSettings.cameraScopeHint')}</p>
+          </>
+        )}
       </div>
 
       {/* C-12 — AI 사용 목적 (purpose, 다중 선택) */}

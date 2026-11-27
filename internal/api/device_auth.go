@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"bluei.kr/edge/internal/config"
+	"bluei.kr/edge/internal/storage"
 )
 
 // device-auth (폰 승인) 로컬 클라이언트 — 대시보드 DeviceLoginScreen 이 호출하는
@@ -141,9 +142,10 @@ func (s *Server) handleDeviceLoginStatus(w http.ResponseWriter, r *http.Request)
 }
 
 // selfRegisterFarm: device-auth 승인 직후 GX10의 site 정보를 클라우드 /gx10/self-register
-// 로 올려 owner의 landBased farm을 자동 생성(멱등)한다. 이게 있어야 앱 landBased 홈에
-// 어장이 뜬다. 실패해도 status 응답엔 영향 없음(로그만 — 다음 승인/재시도에서 멱등 복구).
-func (s *Server) selfRegisterFarm(ctx context.Context, creds config.DeviceCreds) {
+// 로 올려 owner의 farm을 자동 생성(멱등)한다. 앱의 어장 화면에서 승인했으면 서버가 이미 그
+// 어장에 붙여 두어 새로 만들지 않고 linked_existing=true 를 준다(→ 두 번째 반환값).
+// 실패해도 status 응답엔 영향 없음(로그만 — 다음 승인/재시도에서 멱등 복구).
+func (s *Server) selfRegisterFarm(ctx context.Context, creds config.DeviceCreds) (ok, linkedExisting bool) {
 	id := s.readSiteIdentity(ctx)
 	body := map[string]any{
 		"site_name":     id.SiteName,
@@ -164,13 +166,119 @@ func (s *Server) selfRegisterFarm(ctx context.Context, creds config.DeviceCreds)
 	out, code, err := cloudJSON(ctx, http.MethodPost, s.cloudBase()+"/gx10/self-register", body, headers)
 	if err != nil {
 		slog.Error("self-register failed", "err", err)
-		return
+		return false, false
 	}
 	if code != http.StatusOK {
 		slog.Error("self-register rejected", "status", code, "resp", out)
+		return false, false
+	}
+	linked, _ := out["linked_existing"].(bool)
+	slog.Info("self-register ok — farm linked", "idempotent", out["idempotent"], "existing_farm", linked)
+	return true, linked
+}
+
+// importFarmTanks: 앱의 기존 어장에 붙은 경우(앱 어장 화면에서 승인), 그 어장의 운영 중
+// 수조/가두리를 /gx10/farm-tanks 로 받아 GX10 수조로 만들고 입식을 이어받는다(앱 → GX10).
+// 로컬 수조 id = "p_"+앱 수조 id (멱등 — 이미 있으면 건너뜀). 입식은 앱 로트 번호 그대로,
+// imported_from=platform 으로 표시해 나중에 서버로 올릴 때 새 입식으로 중복되지 않게 한다.
+func (s *Server) importFarmTanks(ctx context.Context, creds config.DeviceCreds) {
+	headers := map[string]string{"Authorization": "Bearer " + creds.AccessToken}
+	if creds.NodeCode != "" {
+		headers["X-GX10-Node"] = creds.NodeCode
+	}
+	out, code, err := cloudJSON(ctx, http.MethodPost, s.cloudBase()+"/gx10/farm-tanks", map[string]any{}, headers)
+	if err != nil {
+		slog.Error("farm-tanks import failed", "err", err)
 		return
 	}
-	slog.Info("self-register ok — landBased farm linked", "idempotent", out["idempotent"])
+	if code != http.StatusOK {
+		slog.Error("farm-tanks import rejected", "status", code, "resp", out)
+		return
+	}
+	systemType := "marine_cage"
+	if farm, ok := out["farm"].(map[string]any); ok && asString(farm["domain"]) == "landBased" {
+		systemType = "land_based"
+	}
+	groupID := ""
+	if farm, ok := out["farm"].(map[string]any); ok {
+		s.importFarmInfo(ctx, farm, systemType) // GX10 어장·현장 목록 ("등록된 농장 없음" 방지)
+		groupID = s.importFarmGroup(ctx, farm)  // 현장·수조 탭은 그룹 아래 수조만 보여준다
+	}
+	items, _ := out["tanks"].([]any)
+	imported := 0
+	for _, it := range items {
+		m, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		pid := asString(m["platform_tank_id"])
+		if pid == "" {
+			continue
+		}
+		tankID := "p_" + pid
+		if existing, _ := s.store.GetTankProfile(ctx, tankID); existing != nil {
+			if existing.GroupID == "" && groupID != "" { // 그룹 없이 먼저 가져온 수조
+				existing.GroupID = groupID
+			}
+			applySpeciesBasis(existing, m) // 앱 어종 기준이 정본 — 동기화마다 갱신
+			if err := s.store.UpsertTankProfile(ctx, existing); err != nil {
+				slog.Error("farm-tanks import: profile refresh failed", "tank_id", tankID, "err", err)
+			}
+			continue
+		}
+		name := asString(m["tank_code"])
+		if name == "" {
+			name = tankID
+		}
+		count := int(asFloat(m["count"]))
+		avg := asFloat(m["avg_weight_g"])
+		profile := &storage.TankProfile{
+			TankID:           tankID,
+			PlatformTankID:   pid,
+			DisplayName:      name,
+			Species:          asString(m["species"]),
+			SystemType:       systemType,
+			SiteID:           s.cfg.Site.SiteID,
+			GroupID:          groupID,
+			FishCount:        count,
+			AvgWeightG:       avg,
+			BiomassKg:        float64(count) * avg / 1000.0,
+			MutableLifecycle: systemType == "marine_cage",
+			Metadata:         map[string]any{"source": "platform_import"},
+		}
+		applySpeciesBasis(profile, m)
+		if err := s.store.UpsertTankProfile(ctx, profile); err != nil {
+			slog.Error("farm-tanks import: profile upsert failed", "tank_id", tankID, "err", err)
+			continue
+		}
+		imported++
+		if count <= 0 || avg <= 0 || profile.Species == "" {
+			slog.Warn("farm-tanks import: 입식 정보 부족 — 수조만 생성", "tank_id", tankID)
+			continue
+		}
+		stockedAt := ""
+		if d, e := time.Parse("2006-01-02", asString(m["stocking_date"])); e == nil {
+			stockedAt = d.UTC().Format(time.RFC3339Nano)
+		}
+		if _, _, _, err := s.createTankStocking(ctx, tankID, tankStockingParams{
+			Species:           profile.Species,
+			GrowthStage:       "growout",
+			InitialCount:      count,
+			InitialAvgWeightG: avg,
+			LotNo:             asString(m["lot_code"]),
+			StockedAt:         stockedAt,
+			OperatorID:        "platform_import",
+			ImportedFrom:      "platform",
+		}); err != nil {
+			slog.Error("farm-tanks import: stocking failed", "tank_id", tankID, "err", err)
+		}
+	}
+	slog.Info("farm-tanks import ok", "received", len(items), "imported", imported)
+}
+
+func asFloat(v any) float64 {
+	f, _ := v.(float64)
+	return f
 }
 
 // pushTanks: GX10의 수조/그룹 목록을 클라우드 /gx10/tanks로 올려 tanks를 멱등 생성하고
@@ -199,7 +307,7 @@ func (s *Server) pushTanks(ctx context.Context, creds config.DeviceCreds) {
 	}
 	tankOut := make([]map[string]any, 0, len(tanks))
 	for _, t := range tanks {
-		tankOut = append(tankOut, map[string]any{
+		tm := map[string]any{
 			"gx10_tank_id":    t.TankID,
 			"display_name":    t.DisplayName,
 			"species":         t.Species,
@@ -208,7 +316,21 @@ func (s *Server) pushTanks(ctx context.Context, creds config.DeviceCreds) {
 			"fish_count":      t.FishCount,
 			"avg_weight_g":    t.AvgWeightG,
 			"lifecycle_stage": t.LifecycleStage,
-		})
+		}
+		// 앱 수조에 짝지어진 수조(importFarmTanks) → 서버가 그 행을 갱신(새로 만들지 않음).
+		if t.PlatformTankID != "" {
+			tm["platform_tank_id"] = t.PlatformTankID
+		}
+		// 치수(해상 가두리 depth_m = 그물 깊이). 0/빈 값은 보내지 않는다.
+		if t.FormFactor != "" {
+			tm["form_factor"] = t.FormFactor
+		}
+		for k, v := range map[string]float64{"diameter_m": t.DiameterM, "length_m": t.LengthM, "width_m": t.WidthM, "depth_m": t.DepthM} {
+			if v > 0 {
+				tm[k] = v
+			}
+		}
+		tankOut = append(tankOut, tm)
 	}
 	body := map[string]any{
 		"site_name": s.readSiteIdentity(ctx).SiteName,
@@ -293,7 +415,11 @@ func (s *Server) pushHatchery(ctx context.Context, creds config.DeviceCreds) {
 // syncIdentityToCloud: farm self-register + 수조/그룹 push + 종묘장 엔티티 push.
 // device-auth 승인 직후와 엣지 startup(device 세션 보유 시)에 호출한다. 모두 멱등.
 func (s *Server) syncIdentityToCloud(ctx context.Context, creds config.DeviceCreds) {
-	s.selfRegisterFarm(ctx, creds)
+	if ok, linked := s.selfRegisterFarm(ctx, creds); ok && linked {
+		s.importFarmTanks(ctx, creds)
+		s.importFarmHistory(ctx, creds)        // 수온·급이·폐사 지난 기록 (이후 30분마다 RunFarmHistoryLoop)
+		go s.importFarmEnvironment(ctx, creds) // 바깥 환경 2년 — 처음엔 수백 번 호출이라 뒤에서 (이후 30분 주기)
+	}
 	s.pushTanks(ctx, creds)
 	s.pushHatchery(ctx, creds)
 }

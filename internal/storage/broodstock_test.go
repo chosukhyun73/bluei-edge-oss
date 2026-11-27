@@ -8,7 +8,7 @@ import (
 )
 
 func TestBroodstockCohortCRUD(t *testing.T) {
-	store := openTestStore(t)
+	store := openHatcheryTestStore(t)
 	ctx := context.Background()
 
 	c := &storage.BroodstockCohort{

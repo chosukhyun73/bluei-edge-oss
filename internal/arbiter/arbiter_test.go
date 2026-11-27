@@ -8,6 +8,7 @@ import (
 
 	"bluei.kr/edge/internal/arbiter"
 	"bluei.kr/edge/internal/config"
+	"bluei.kr/edge/internal/controller"
 	"bluei.kr/edge/internal/feed_cycle"
 	"bluei.kr/edge/internal/storage"
 )
@@ -21,6 +22,14 @@ type mockStore struct {
 	insertedCycles []*storage.FeedCycle
 	decisions      []*storage.ArbiterDecision
 	sensorReadings map[sensorReadingKey]*storage.LatestSensorReading
+}
+
+// GetTankAutonomousMode — 사이클 goroutine(feed_cycle worker.go:408)이 시작 직후
+// 부르는 조회. 임베드한 storage.Store 가 nil 이라 이 메서드가 없으면 승격 호출이
+// nil 역참조로 패닉한다 (2026-07-21 자율모드 배선 때 이 목이 함께 갱신되지 않았다).
+// nil 반환 = 자율모드 미설정 → worker 가 "off" 로 처리하는 정상 경로.
+func (m *mockStore) GetTankAutonomousMode(_ context.Context, _ string) (*storage.TankAutonomousMode, error) {
+	return nil, nil
 }
 
 func (m *mockStore) ListActiveFeedCycles(_ context.Context) ([]*storage.FeedCycle, error) {
@@ -41,6 +50,12 @@ func (m *mockStore) InsertFeedCycle(_ context.Context, c *storage.FeedCycle) err
 
 func (m *mockStore) UpdateFeedCycleProgress(_ context.Context, _ string, _ int, _ float64) error {
 	return nil
+}
+
+// ListControllers — worker 가 사이클 시작 시 onoff 급이기 해석에 호출
+// (resolveOnoffFeeder). 빈 목록 = onoff_feeder 미바인딩(ESP32 stub 경로).
+func (m *mockStore) ListControllers(_ context.Context, _ string) ([]*controller.Controller, error) {
+	return nil, nil
 }
 
 func (m *mockStore) CompleteFeedCycle(_ context.Context, cycleID string, _ int, _ float64, _ string, _ time.Time) error {

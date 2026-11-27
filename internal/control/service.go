@@ -13,24 +13,33 @@ import (
 	"bluei.kr/edge/internal/storage"
 )
 
+// Adapter executes a control command against a device. MockAdapter and
+// OnoffFeederControlAdapter both satisfy this.
+type Adapter interface {
+	Execute(ctx context.Context, commandID, commandType string, params map[string]any) (map[string]any, error)
+}
+
 // Service validates, records, and dispatches control commands.
 type Service struct {
-	app     *runtime.App
-	cfg     *config.ControlConfig
-	devices *config.DevicesConfig
-	store   storage.Store
-	mocks   map[string]*MockAdapter // adapter id -> mock
-	cancel  context.CancelFunc
+	app      *runtime.App
+	cfg      *config.ControlConfig
+	devices  *config.DevicesConfig
+	store    storage.Store
+	adapters map[string]Adapter // adapter id -> control adapter
+	cancel   context.CancelFunc
 }
 
 func NewService(app *runtime.App, cfg *config.ControlConfig, devices *config.DevicesConfig, store storage.Store) *Service {
-	mocks := map[string]*MockAdapter{}
+	adapters := map[string]Adapter{}
 	for _, a := range cfg.Adapters {
-		if a.Type == "mock_control" {
-			mocks[a.ID] = NewMockAdapter(a)
+		switch a.Type {
+		case "mock_control":
+			adapters[a.ID] = NewMockAdapter(a)
+		case "onoff_feeder_control":
+			adapters[a.ID] = NewOnoffFeederControlAdapter(a)
 		}
 	}
-	return &Service{app: app, cfg: cfg, devices: devices, store: store, mocks: mocks}
+	return &Service{app: app, cfg: cfg, devices: devices, store: store, adapters: adapters}
 }
 
 func (s *Service) Name() string { return "control" }
@@ -350,7 +359,7 @@ func (s *Service) dispatch(commandID, deviceID, commandType, adapterID string, c
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	adapter, ok := s.mocks[adapterID]
+	adapter, ok := s.adapters[adapterID]
 	if !ok {
 		// Non-mock adapters are expected to be polled by ESP32/controller nodes.
 		slog.Info("command queued for external controller", "adapter_id", adapterID, "command_id", commandID)

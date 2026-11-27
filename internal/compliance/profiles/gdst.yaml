@@ -1,0 +1,10 @@
+id: gdst
+name: GDST
+version: "1.2 (2.0 은 2026-09-01 발표, 2027-09 까지 전환)"
+checked_at: "2026-11-17"
+min_retention_years: 0
+items:
+  - {id: license, title: 영업 허가·등록 명칭·번호·발급 당국을 등록했다, required: true, check: license, note: 2.0 가공 기록의 인증 1건(processorLicense)으로 쓴다. 한국 신고번호 인정 여부는 GDST 사무국 확인 대기}
+  - {id: welfare, title: 인권 정책 유무를 골랐다, required: true, check: human_welfare_policy}
+  - {id: events, title: 수령·가공·출하 기록(투입 lot → 산출 lot·수량), required: true, check: later}
+  - {id: food_safety, title: 식품안전 기록, required: false, check: manual, note: GDST 는 식품안전을 요구하지 않는다. HACCP 은 GX10 발행 문서로 낸다}

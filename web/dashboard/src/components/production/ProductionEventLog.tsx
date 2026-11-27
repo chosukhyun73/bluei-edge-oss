@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useLanguage } from '../../lib/language-context';
+import { dateLocale } from '../../lib/format';
+import { useLanguage } from '../../lib/language-core';
 import { Plus, ChevronDown, ChevronRight, Syringe, Skull, ArrowRightLeft, ListTree, Utensils, Paperclip } from 'lucide-react';
 import { Tanks, Feedings, Documents, Inventory, ApiError } from '../../lib/api';
 import type {
@@ -10,10 +11,15 @@ import type {
 } from '../../lib/types';
 import { Field, SelectField } from '../sections/TankSettingsSection';
 import { Button } from '../ui/button';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ProductionEventLog — 생산·이벤트 기록 탭
-// 탱크 선택 → 사료/투약/폐사/이동 기록 → CTE 타임라인
+// 탱크 선택 → 기록 종류별 서브탭(사료/투약/폐사/이동) → 각 탭 = 입력 폼 + 그 종류 이력
+//
+// 종전에는 아코디언 4개 아래에 전 종류가 섞인 CTE 타임라인 하나였다. 사료가 하루 8회
+// 쌓이다 보니 (tank_01 기준 105건 중 99건) 폐사 4건·투약 기록이 그 사이에 묻혀
+// 사실상 조회가 불가능했다. 종류별로 화면을 갈라 이력을 바로 보게 한다 (2026-10-05).
 // ─────────────────────────────────────────────────────────────────────────────
 
 function friendlyError(err: unknown, tr: (key: string) => string): string {
@@ -139,7 +145,7 @@ function cteSummary(item: TraceabilityCTE, tr: Tr): string {
     case 'feeding': {
       const typePart = p['feed_type'] ? ` ${p['feed_type']}` : '';
       const lotPart = p['feed_lot'] ? ` lot ${p['feed_lot']}` : '';
-      return tr('productionEventLog.summaryFeed', { amount: String(p['feed_amount_g'] ?? '?') }) + typePart + lotPart;
+      return tr('productionEventLog.summaryFeed', { amount: p['feed_amount_g'] != null ? Number(p['feed_amount_g']).toFixed(1) : '?' }) + typePart + lotPart;
     }
     case 'sampling':
       return tr('productionEventLog.summarySampling', { weight: String(p['avg_weight_g'] ?? '?') });
@@ -148,8 +154,14 @@ function cteSummary(item: TraceabilityCTE, tr: Tr): string {
       const dose = p['dose'] != null ? ` ${p['dose']}${p['dose_unit'] ?? ''}` : '';
       return tr('productionEventLog.summaryTreatment', { substance: String(sub) }) + dose;
     }
-    case 'mortality':
-      return tr('productionEventLog.summaryMortality', { count: String(p['dead_count'] ?? '?') });
+    case 'mortality': {
+      // 운영자가 입력한 추정 원인·폐사중량을 같이 남긴다 — 마릿수만으로는 나중에
+      // 왜 죽었는지 되짚을 수 없다 (2026-10-05 운영자 요청). 원인은 자유 입력이라
+      // 가운뎃점으로 끊어 붙인다.
+      const cause = p['estimated_cause'] ? ` · ${p['estimated_cause']}` : '';
+      const weight = p['dead_weight_g'] != null ? ` · ${Number(p['dead_weight_g']).toFixed(0)}g` : '';
+      return tr('productionEventLog.summaryMortality', { count: String(p['dead_count'] ?? '?') }) + cause + weight;
+    }
     case 'transfer':
       if (p['transfer_type'] === 'sale') {
         return tr('productionEventLog.summarySale', { destination: String(p['destination_name'] ?? '?') });
@@ -335,7 +347,7 @@ function TimelineRowDocs({
 
 function FeedingForm({ tankId, onSaved }: { tankId: string; onSaved: () => void }) {
   const { tr } = useLanguage();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true); // 탭당 폼 1개 — 기본 펼침
   const [feedAmountG, setFeedAmountG] = useState('');
   const [feedType, setFeedType] = useState('');
   const [feedLot, setFeedLot] = useState('');
@@ -386,7 +398,7 @@ function FeedingForm({ tankId, onSaved }: { tankId: string; onSaved: () => void 
       if (feedType) body.feed_type = feedType.trim();
       if (feedLot) body.feed_lot = feedLot.trim();
       if (feedSupplier) body.feed_supplier = feedSupplier.trim();
-      if (fedAt) body.fed_at = fedAt;
+      if (fedAt) body.fed_at = new Date(fedAt).toISOString(); // 날짜→RFC3339
       if (recordedBy) body.recorded_by = recordedBy.trim();
       body.source = 'manual';
       if (selectedItemId) {
@@ -481,7 +493,7 @@ function FeedingForm({ tankId, onSaved }: { tankId: string; onSaved: () => void 
 
 function TreatmentForm({ tankId, onSaved }: { tankId: string; onSaved: () => void }) {
   const { tr } = useLanguage();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true); // 탭당 폼 1개 — 기본 펼침
   const [treatmentType, setTreatmentType] = useState<TreatmentType>('antibiotic');
   const [substance, setSubstance] = useState('');
   const [dose, setDose] = useState('');
@@ -611,10 +623,10 @@ function TreatmentForm({ tankId, onSaved }: { tankId: string; onSaved: () => voi
 
 function MortalityForm({ tankId, onSaved }: { tankId: string; onSaved: () => void }) {
   const { tr } = useLanguage();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true); // 탭당 폼 1개 — 기본 펼침
   const [deadCount, setDeadCount] = useState('');
   const [estimatedCause, setEstimatedCause] = useState('');
-  const [notes, setNotes] = useState('');
+  const [deadWeightG, setDeadWeightG] = useState('');
   const [operatorId, setOperatorId] = useState(tr('mortalityForm.defaultOperator'));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -627,13 +639,13 @@ function MortalityForm({ tankId, onSaved }: { tankId: string; onSaved: () => voi
     try {
       const body: NewMortalityBody = { dead_count: Number(deadCount) };
       if (estimatedCause) body.estimated_cause = estimatedCause.trim();
-      if (notes) body.notes = notes.trim();
+      if (deadWeightG) body.dead_weight_g = Number(deadWeightG);
       if (operatorId) body.operator_id = operatorId.trim();
       const r = await Tanks.mortality(tankId, body);
       setOk(tr('productionEventLog.mortalitySavedOk', { id: r.mortality_id, count: r.dead_count }));
       setDeadCount('');
       setEstimatedCause('');
-      setNotes('');
+      setDeadWeightG('');
       onSaved();
     } catch (e) {
       setErr(friendlyError(e, tr));
@@ -660,7 +672,7 @@ function MortalityForm({ tankId, onSaved }: { tankId: string; onSaved: () => voi
             <Field label={tr('mortalityForm.estimatedCauseLabel')} value={estimatedCause} onChange={setEstimatedCause} />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label={tr('mortalityForm.notesLabel')} value={notes} onChange={setNotes} />
+            <Field label={tr('mortalityForm.deadWeightLabel')} type="number" value={deadWeightG} onChange={setDeadWeightG} />
             <Field label={tr('mortalityForm.operatorLabel')} value={operatorId} onChange={setOperatorId} />
           </div>
           {err && <div className="px-2 py-1 bg-red-500/10 border border-red-500/30 rounded text-[11px] text-red-400 font-mono">{err}</div>}
@@ -679,7 +691,7 @@ function MortalityForm({ tankId, onSaved }: { tankId: string; onSaved: () => voi
 
 function TransferForm({ tankId, onSaved }: { tankId: string; onSaved: () => void }) {
   const { tr } = useLanguage();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true); // 탭당 폼 1개 — 기본 펼침
   const [transferType, setTransferType] = useState<TransferType>('move');
   const [toTankId, setToTankId] = useState('');
   const [toLotNo, setToLotNo] = useState('');
@@ -798,33 +810,31 @@ function TransferForm({ tankId, onSaved }: { tankId: string; onSaved: () => void
 
 function EventTimeline({
   tankId,
-  refreshKey,
+  data,
+  loading,
+  err,
+  types,
+  title,
   onDocUploaded,
 }: {
   tankId: string;
-  refreshKey: number;
+  data: TankTraceabilityResponse | null;
+  loading: boolean;
+  err: string | null;
+  types?: TraceabilityCTE['type'][]; // 미지정 = 전체 종류
+  title: string;
   onDocUploaded: () => void;
 }) {
   const { tr } = useLanguage();
-  const [data, setData] = useState<TankTraceabilityResponse | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!tankId) return;
-    setLoading(true);
-    setErr(null);
-    Tanks.traceability(tankId)
-      .then(setData)
-      .catch(e => setErr(friendlyError(e, tr)))
-      .finally(() => setLoading(false));
-  }, [tankId, refreshKey]);
 
   if (loading) return <div className="text-xs text-gray-500">{tr('eventTimeline.loading')}</div>;
   if (err) return <div className="text-xs text-red-400 font-mono">{err}</div>;
   if (!data) return null;
 
   const docs: TraceabilityDoc[] = data.documents ?? [];
+  const rows = (types ? data.timeline.filter(i => types.includes(i.type)) : data.timeline)
+    .slice()
+    .reverse(); // 최신 우선
 
   // 각 타임라인 행에 붙은 서류 계산
   function docsForRow(item: TraceabilityCTE): TraceabilityDoc[] {
@@ -845,21 +855,21 @@ function EventTimeline({
     <div className="space-y-1">
       <div className="flex items-center gap-2 text-xs text-teal-400 font-medium pb-1">
         <ListTree className="w-3.5 h-3.5" />
-        {tr('eventTimeline.title')}
-        <span className="text-teal-500 font-mono">{tr('productionEventLog.eventCount', { count: data.count })}</span>
+        {title}
+        <span className="text-teal-500 font-mono">{tr('productionEventLog.eventCount', { count: rows.length })}</span>
       </div>
-      {data.timeline.length === 0 && (
+      {rows.length === 0 && (
         <div className="text-xs text-gray-500">{tr('eventTimeline.noEvents')}</div>
       )}
       <ol className="space-y-2">
-        {[...data.timeline].reverse().map(item => (
+        {rows.map(item => (
           <li key={item.sequence} className="py-1 border-b border-gray-800 last:border-0">
             <div className="flex items-start gap-2 text-xs">
               <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${cteTypeBadge(item.type)}`}>
                 {cteTypeName(item.type, tr)}
               </span>
               <span className="text-gray-400 font-mono shrink-0">
-                {new Date(item.recorded_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                {new Date(item.recorded_at).toLocaleString(dateLocale(), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
               </span>
               <span className="text-gray-300 truncate">{cteSummary(item, tr)}</span>
             </div>
@@ -879,12 +889,21 @@ function EventTimeline({
 
 // ── ProductionEventLog (exported) ─────────────────────────────────────────────
 
+type SubTab = 'feeding' | 'treatment' | 'mortality' | 'transfer' | 'all';
+
 export function ProductionEventLog() {
   const { tr } = useLanguage();
   const [tanks, setTanks] = useState<Tank[]>([]);
   const [selectedTankId, setSelectedTankId] = useState<string>('');
   const [tanksErr, setTanksErr] = useState<string | null>(null);
   const [timelineKey, setTimelineKey] = useState(0);
+  const [sub, setSub] = useState<SubTab>('feeding');
+
+  // traceability 를 이 레벨에서 한 번만 받는다 — 탭 라벨의 건수와 각 탭이 그리는
+  // 이력이 같은 응답을 봐야 어긋나지 않는다 (탭마다 따로 조회하면 갈린다).
+  const [trace, setTrace] = useState<TankTraceabilityResponse | null>(null);
+  const [traceErr, setTraceErr] = useState<string | null>(null);
+  const [traceLoading, setTraceLoading] = useState(false);
 
   const reload = useCallback(async () => {
     setTanksErr(null);
@@ -901,18 +920,49 @@ export function ProductionEventLog() {
 
   useEffect(() => { void reload(); }, [reload]);
 
+  useEffect(() => {
+    if (!selectedTankId) { setTrace(null); return; }
+    let alive = true;
+    setTraceLoading(true);
+    setTraceErr(null);
+    Tanks.traceability(selectedTankId)
+      .then(d => { if (alive) setTrace(d); })
+      .catch(e => { if (alive) setTraceErr(friendlyError(e, tr)); })
+      .finally(() => { if (alive) setTraceLoading(false); });
+    return () => { alive = false; };
+  }, [selectedTankId, timelineKey]);
+
   const refreshTimeline = () => setTimelineKey(k => k + 1);
+
+  const countOf = (types: TraceabilityCTE['type'][]) =>
+    trace ? trace.timeline.filter(i => types.includes(i.type)).length : 0;
+
+  // 이동 탭은 출하(harvest)까지 받는다 — 폼 하나(이동/선별/판매)가 둘 다 만든다.
+  const TABS: { key: Exclude<SubTab, 'all'>; types: TraceabilityCTE['type'][]; label: string }[] = [
+    { key: 'feeding',   types: ['feeding'],              label: tr('productionEventLog.cteFeeding') },
+    { key: 'treatment', types: ['treatment'],            label: tr('productionEventLog.cteTreatment') },
+    { key: 'mortality', types: ['mortality'],            label: tr('productionEventLog.cteMortality') },
+    { key: 'transfer',  types: ['transfer', 'harvest'],  label: tr('productionEventLog.cteTransfer') },
+  ];
+
+  const formFor = (key: Exclude<SubTab, 'all'>) => {
+    switch (key) {
+      case 'feeding':   return <FeedingForm tankId={selectedTankId} onSaved={refreshTimeline} />;
+      case 'treatment': return <TreatmentForm tankId={selectedTankId} onSaved={refreshTimeline} />;
+      case 'mortality': return <MortalityForm tankId={selectedTankId} onSaved={refreshTimeline} />;
+      case 'transfer':  return <TransferForm tankId={selectedTankId} onSaved={refreshTimeline} />;
+    }
+  };
 
   return (
     <div className="space-y-5">
-      {/* 헤더 */}
+      {/* 헤더 — 수조 선택 */}
       <div className="bg-gradient-to-br from-gray-900 to-black border border-teal-500/20 rounded-lg p-4 space-y-4">
         <h2 className="text-sm font-medium text-white flex items-center gap-2">
           <ListTree className="w-4 h-4 text-teal-400" />
           {tr('productionEventLog.title')}
         </h2>
 
-        {/* 수조 선택 */}
         {tanksErr ? (
           <div className="text-xs text-red-400 font-mono">{tanksErr}</div>
         ) : (
@@ -932,27 +982,55 @@ export function ProductionEventLog() {
             </select>
           </div>
         )}
-
-        {/* 기록 버튼 영역 */}
-        {selectedTankId && (
-          <div className="space-y-2">
-            <FeedingForm tankId={selectedTankId} onSaved={refreshTimeline} />
-            <TreatmentForm tankId={selectedTankId} onSaved={refreshTimeline} />
-            <MortalityForm tankId={selectedTankId} onSaved={refreshTimeline} />
-            <TransferForm tankId={selectedTankId} onSaved={refreshTimeline} />
-          </div>
-        )}
       </div>
 
-      {/* 이벤트 타임라인 */}
+      {/* 기록 종류별 탭 — 각 탭 = 입력 폼 + 그 종류의 과거 기록 */}
       {selectedTankId && (
-        <div className="bg-gradient-to-br from-gray-900 to-black border border-gray-700/40 rounded-lg p-4">
-          <EventTimeline
-            tankId={selectedTankId}
-            refreshKey={timelineKey}
-            onDocUploaded={refreshTimeline}
-          />
-        </div>
+        <Tabs value={sub} onValueChange={v => setSub(v as SubTab)}>
+          <TabsList>
+            {TABS.map(t => (
+              <TabsTrigger key={t.key} value={t.key}>
+                {t.label}
+                <span className="ml-1.5 font-mono text-[10px] opacity-60">{countOf(t.types)}</span>
+              </TabsTrigger>
+            ))}
+            <TabsTrigger value="all">
+              {tr('productionEventLog.tabAll')}
+              <span className="ml-1.5 font-mono text-[10px] opacity-60">{trace?.timeline.length ?? 0}</span>
+            </TabsTrigger>
+          </TabsList>
+
+          {TABS.map(t => (
+            <TabsContent key={t.key} value={t.key} className="pt-4 space-y-4">
+              {formFor(t.key)}
+              <div className="bg-gradient-to-br from-gray-900 to-black border border-gray-700/40 rounded-lg p-4">
+                <EventTimeline
+                  tankId={selectedTankId}
+                  data={trace}
+                  loading={traceLoading}
+                  err={traceErr}
+                  types={t.types}
+                  title={t.label}
+                  onDocUploaded={refreshTimeline}
+                />
+              </div>
+            </TabsContent>
+          ))}
+
+          {/* 전체 — 종전 CTE 타임라인 그대로 (종류 혼합, 추적성 확인용) */}
+          <TabsContent value="all" className="pt-4">
+            <div className="bg-gradient-to-br from-gray-900 to-black border border-gray-700/40 rounded-lg p-4">
+              <EventTimeline
+                tankId={selectedTankId}
+                data={trace}
+                loading={traceLoading}
+                err={traceErr}
+                title={tr('eventTimeline.title')}
+                onDocUploaded={refreshTimeline}
+              />
+            </div>
+          </TabsContent>
+        </Tabs>
       )}
     </div>
   );

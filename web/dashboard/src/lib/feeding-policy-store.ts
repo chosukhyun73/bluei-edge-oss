@@ -25,7 +25,19 @@ export const DEFAULT_OPERATING_MODE: OperatingMode = 'auto';
 export type GroupPolicy = {
   bsf_mode: BsfMode;
   max_daily_cycles: number;
+  // 일 사이클 수 직접 지정 (0 = 자동: 1일량÷1회최대량 산출 + max_daily_cycles 상한).
+  // >0 이면 자동 산출을 대체 — backend AIScheduler 와 동일 (2026-07-07).
+  daily_cycles: number;
   operating_mode: OperatingMode;
+  // 급이 활동시간대(점등시간) — 소등되면 카메라 영상이 없어 급이·관찰 불가. 급이는 이 창 안에서만.
+  photoperiod_start_min: number; // 점등(시작) 분/자정기준. 예: 540 = 09:00
+  photoperiod_end_min: number;   // 소등(종료) 분. 예: 1020 = 17:00
+  // 급이기 마이크로펄스 — onoff_feeder(on/off): run초 가동(≈9.4×run g) → stop초 정지(섭취) 반복해 회당 목표량 채움.
+  feeder_run_sec: number;  // 펄스 1회 가동(초)
+  feeder_stop_sec: number; // 펄스 사이 정지·섭취(초)
+  // 공급모터 리드타임(초) — 살포모터 기동 후 공급모터 체결까지 대기 (실측 2026-07-04: +11~13s).
+  // backend 가 펄스 ON 시간에 가산. 배출량 계산은 가동초만 사용.
+  feeder_spinup_sec: number;
 };
 
 export type TankPolicyOverride = {
@@ -50,7 +62,13 @@ function defaultGroupPolicy(): GroupPolicy {
   return {
     bsf_mode: DEFAULT_BSF_MODE,
     max_daily_cycles: MAX_DAILY_CYCLES,
+    daily_cycles: 0, // 0 = 자동 산출
     operating_mode: DEFAULT_OPERATING_MODE,
+    photoperiod_start_min: 9 * 60,  // 09:00 (점등 추정 — 실측 후 보정)
+    photoperiod_end_min: 17 * 60,   // 17:00 (소등 ~17:30 전 버퍼)
+    feeder_run_sec: 3,              // 1회 3초 공급 ≈ 28.2g (2026-07-04 현장 결정)
+    feeder_stop_sec: 6,             // 사이 6초 정지(섭취) — 현장 실측 안정값
+    feeder_spinup_sec: 11,          // 공급모터 리드 (2026-07-04 영상 실측 +11~13s)
   };
 }
 
@@ -81,6 +99,15 @@ function parseGroupPolicy(raw: unknown): GroupPolicy | null {
   if (typeof obj['operating_mode'] === 'string')
     base.operating_mode = obj['operating_mode'] as OperatingMode;
   if (typeof obj['max_daily_cycles'] === 'number') base.max_daily_cycles = obj['max_daily_cycles'];
+  if (typeof obj['daily_cycles'] === 'number') base.daily_cycles = obj['daily_cycles'];
+  if (typeof obj['photoperiod_start_min'] === 'number')
+    base.photoperiod_start_min = obj['photoperiod_start_min'];
+  if (typeof obj['photoperiod_end_min'] === 'number')
+    base.photoperiod_end_min = obj['photoperiod_end_min'];
+  if (typeof obj['feeder_run_sec'] === 'number') base.feeder_run_sec = obj['feeder_run_sec'];
+  if (typeof obj['feeder_stop_sec'] === 'number') base.feeder_stop_sec = obj['feeder_stop_sec'];
+  if (typeof obj['feeder_spinup_sec'] === 'number')
+    base.feeder_spinup_sec = obj['feeder_spinup_sec'];
   return base;
 }
 
@@ -105,25 +132,11 @@ export function ensureLoaded(): Promise<void> {
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
     try {
-      const gRes = await Groups.list();
-      for (const g of gRes.items) {
-        groupRowCache.set(g.group_id, g);
-        const meta = (g.metadata ?? {}) as Record<string, unknown>;
-        groupMetaRawCache.set(g.group_id, meta);
-        const fp = parseGroupPolicy(meta['feeding_policy']);
-        if (fp) groupPoliciesCache.set(g.group_id, fp);
-      }
-      const tRes = await Tanks.list();
-      for (const t of tRes.items) {
-        tankRowCache.set(t.tank_id, t);
-        const meta = (t.metadata ?? {}) as Record<string, unknown>;
-        tankMetaRawCache.set(t.tank_id, meta);
-        const ov = parseTankOverride(meta['feeding_policy_override']);
-        if (ov) tankOverridesCache.set(t.tank_id, ov);
-      }
+      await loadFromBackend();
       cacheLoaded = true;
       clearLegacyStorage();
       dispatchChanged();
+      armAutoRefresh();
     } catch {
       // network 오류 시 캐시 비어있어 default 반환. 다음 ensureLoaded() 재시도.
       loadPromise = null;
@@ -131,6 +144,47 @@ export function ensureLoaded(): Promise<void> {
     }
   })();
   return loadPromise;
+}
+
+// backend 조회 → 캐시 재구성. ensureLoaded(최초 1회) 와 주기 refresh 가 공유.
+// fetch 성공 후에만 clear+재구성 — 외부에서 제거된 override 잔존 방지 + 실패 시 기존 유지.
+async function loadFromBackend(): Promise<void> {
+  const gRes = await Groups.list();
+  const tRes = await Tanks.list();
+  groupRowCache.clear();
+  groupMetaRawCache.clear();
+  groupPoliciesCache.clear();
+  tankRowCache.clear();
+  tankMetaRawCache.clear();
+  tankOverridesCache.clear();
+  for (const g of gRes.items) {
+    groupRowCache.set(g.group_id, g);
+    const meta = (g.metadata ?? {}) as Record<string, unknown>;
+    groupMetaRawCache.set(g.group_id, meta);
+    const fp = parseGroupPolicy(meta['feeding_policy']);
+    if (fp) groupPoliciesCache.set(g.group_id, fp);
+  }
+  for (const t of tRes.items) {
+    tankRowCache.set(t.tank_id, t);
+    const meta = (t.metadata ?? {}) as Record<string, unknown>;
+    tankMetaRawCache.set(t.tank_id, meta);
+    const ov = parseTankOverride(meta['feeding_policy_override']);
+    if (ov) tankOverridesCache.set(t.tank_id, ov);
+  }
+}
+
+// 주기 재조회 — 정책이 이 화면 밖(backend/API/다른 세션)에서 바뀌어도 모드 토글·스케줄
+// 카드가 자동 동기되도록 60초마다 refresh + change 이벤트. 앱 수명 동안 유지(1회 arming).
+const POLICY_REFRESH_INTERVAL_MS = 60_000;
+let autoRefreshArmed = false;
+function armAutoRefresh(): void {
+  if (autoRefreshArmed || typeof window === 'undefined') return;
+  autoRefreshArmed = true;
+  window.setInterval(() => {
+    loadFromBackend()
+      .then(() => dispatchChanged())
+      .catch(() => { /* 네트워크 오류 — 기존 캐시 유지, 다음 tick 재시도 */ });
+  }, POLICY_REFRESH_INTERVAL_MS);
 }
 
 // ── 동기 getter — 캐시 미로드 시 default + background fetch trigger ─────────────
@@ -182,6 +236,12 @@ export function setTankOverride(tank_id: string, override: TankPolicyOverride): 
   tankMetaRawCache.set(tank_id, meta);
   dispatchChanged();
   postTankMetadata(tank_id, meta);
+}
+
+// 기존 override 를 보존하며 일부 필드만 갱신 — setTankOverride 는 통째 교체라
+// 호출처가 patch 의도로 쓰면 다른 필드(bsf_mode ↔ operating_mode)가 지워진다 (2026-07-08 fix).
+export function mergeTankOverride(tank_id: string, patch: TankPolicyOverride): void {
+  setTankOverride(tank_id, { ...getTankOverride(tank_id), ...patch });
 }
 
 export function clearTankOverride(tank_id: string): void {
@@ -245,6 +305,7 @@ export function getEffectiveTankPolicy(
     override.max_daily_cycles != null ||
     override.operating_mode != null;
   return {
+    ...groupDefault, // photoperiod 등 그룹 기본값 보존 (override 없는 필드)
     bsf_mode: override.bsf_mode ?? groupDefault.bsf_mode,
     max_daily_cycles: override.max_daily_cycles ?? groupDefault.max_daily_cycles,
     operating_mode: override.operating_mode ?? groupDefault.operating_mode,

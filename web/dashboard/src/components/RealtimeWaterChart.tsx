@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
+import { dateLocale } from '../lib/format';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { Tanks } from '../lib/api';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 type DataPoint = { time: string; value: number; ts: number };
 
@@ -18,7 +19,7 @@ interface Props {
 
 // HH:MM:SS 포맷 — 시계열 x축 레이블용
 function hhmmss(d: Date): string {
-  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export function RealtimeWaterChart({

@@ -7,7 +7,7 @@ import { Button } from './ui/button';
 import { ConfirmDialog } from './ui/confirm-dialog';
 import { relativeTime } from '../lib/format';
 import { computeVolumeFromStrings, volumeHint } from '../lib/volume';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 interface Props {
   tanks: Tank[];
@@ -95,7 +95,7 @@ export function GroupTankComparison({ tanks, stateVectors, onSelectTank, groupId
           {tr('groupTankComparison.noTanks')}
         </div>
       ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4 gap-4">
       {tanks.map(tank => {
         const sv = stateVectors.get(tank.tank_id);
         const bio = sv?.biological_context;
@@ -185,13 +185,11 @@ export function GroupTankComparison({ tanks, stateVectors, onSelectTank, groupId
                 : tr('groupTankComparison.alertCount', { count: openAlerts.length })}
             </div>
 
-            {/* 카메라 썸네일 스트립 */}
+            {/* 카메라 — 카드 폭에 맞춰 세로로 쌓는다. 수중 카메라가 있으면 탑뷰 아래로 붙는다. */}
             {tankCameras.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto">
+              <div className="space-y-2">
                 {tankCameras.map(cam => (
-                  <div key={cam.camera_id} className="flex-shrink-0 w-28">
-                    <CameraTile camera={cam} />
-                  </div>
+                  <CameraTile key={cam.camera_id} camera={cam} />
                 ))}
               </div>
             )}

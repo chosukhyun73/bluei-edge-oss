@@ -9,7 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { relativeTime } from '../../lib/format';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -91,6 +91,11 @@ function ActiveStateBlock({ state }: { state: VisionAlgorithmActiveState | null 
         {state.active_job_id && <span>job: <span className="text-gray-300 font-mono">{state.active_job_id}</span></span>}
         {state.operator_id && <span>by: <span className="text-gray-300">{state.operator_id}</span></span>}
       </div>
+      {state.note && (
+        <div className="text-gray-400 pl-5 pt-0.5">
+          <span className="text-gray-500">{tr('modelRegistry.noteLabel')}:</span> {state.note}
+        </div>
+      )}
     </div>
   );
 }
@@ -114,6 +119,7 @@ function HistoryBlock({ state }: { state: VisionAlgorithmActiveState | null }) {
               {h.removed_at && <span>· {tr('modelRegistry.replacedAt', { time: relativeTime(h.removed_at) })}</span>}
               {h.operator_id && <span>· {h.operator_id}</span>}
             </div>
+            {h.note && <div className="text-gray-500 text-[10px]">{h.note}</div>}
           </li>
         ))}
       </ul>
@@ -155,19 +161,25 @@ function AlgorithmCard({
   const hasHistory = (activeState?.history?.length ?? 0) > 0;
   const hasActive = !!activeState?.active_weights_path;
 
-  // R12 — 카드별 학습 상태. backend training/status 가 *전체 1 job* 만 추적이라
-  // 다른 알고리즘 학습 중이면 본 카드 학습 disabled.
-  const isThisAlgoTraining = !!(training?.is_running && training.algorithm_id === algo.vision_algorithm_id);
-  const isOtherAlgoTraining = !!(training?.is_running && training.algorithm_id !== algo.vision_algorithm_id);
+  // 카드별 학습 상태. backend 는 *전체 1 job* 만 실행하므로 진행 주체는 current_job 로 구분.
+  const runningJobAlgo = training?.is_running ? training.current_job?.algorithm_id ?? null : null;
+  const isThisAlgoTraining = runningJobAlgo === algo.vision_algorithm_id;
+  const isOtherAlgoTraining = !!runningJobAlgo && runningJobAlgo !== algo.vision_algorithm_id;
   const isDeprecated = algo.status === 'deprecated';
   const trainKind = trainingKindFor(algo);
+  // 오프라인 파이프라인 (예: 세그먼트 2-head = train_segments.py) — 화면 학습 버튼 미연결.
+  const offlinePipeline = typeof algo.model?.training_pipeline === 'string';
 
-  // Promote 가능 조건: 백엔드가 candidate_path 결정 (running job completed 또는 명시). UI 는 막지 않고 시도하게 둠.
-  const promoteDisabled = busy || isThisAlgoTraining;
+  // Promote — 적용 대기 후보(candidate_path)가 있을 때만. 이미 적용된 모델뿐이면 비활성.
+  const candidatePath = activeState?.candidate_path ?? '';
+  const promoteDisabled = busy || isThisAlgoTraining || !candidatePath;
   // Rollback 은 history 있어야.
   const rollbackDisabled = busy || !hasHistory || isThisAlgoTraining;
-  // 학습 시작 disabled — 진행 중이거나 deprecated.
-  const trainDisabled = busy || isThisAlgoTraining || isOtherAlgoTraining || isDeprecated;
+  // 학습 시작 — 진행 중/deprecated/오프라인 파이프라인 + 데이터 게이트(validation gate) 미달 시 비활성.
+  const gateReady = trainKind === 'vision-detector'
+    ? !!training?.bootstrap?.can_start_training
+    : !!training?.dispute?.can_validate;
+  const trainDisabled = busy || isThisAlgoTraining || isOtherAlgoTraining || isDeprecated || offlinePipeline || !gateReady;
 
   async function handlePromote() {
     setBusy(true); setActionError(null);
@@ -358,11 +370,15 @@ function AlgorithmCard({
           title={
             isDeprecated
               ? tr('modelRegistry.titleTrainDeprecated')
-              : isOtherAlgoTraining
-                ? tr('modelRegistry.titleTrainOtherRunning')
-                : isThisAlgoTraining
-                  ? tr('modelRegistry.titleTrainAlreadyRunning')
-                  : `${tr('modelRegistry.titleTrainStart')} (kind=${trainKind})`
+              : offlinePipeline
+                ? tr('modelRegistry.titleTrainOffline')
+                : isOtherAlgoTraining
+                  ? tr('modelRegistry.titleTrainOtherRunning')
+                  : isThisAlgoTraining
+                    ? tr('modelRegistry.titleTrainAlreadyRunning')
+                    : !gateReady
+                      ? tr('modelRegistry.titleTrainGateNotReady')
+                      : `${tr('modelRegistry.titleTrainStart')} (kind=${trainKind})`
           }
         >
           🎓 {tr('modelRegistry.trainStart')} ({trainKind === 'lrcn-finetune' ? 'LRCN' : 'YOLO'})
@@ -371,7 +387,11 @@ function AlgorithmCard({
           onClick={() => { setActionError(null); setConfirm('promote'); }}
           disabled={promoteDisabled}
           className="px-3 py-1.5 text-xs rounded font-medium bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white transition-colors"
-          title={hasActive ? tr('modelRegistry.titlePromoteOverwrite') : tr('modelRegistry.titlePromoteFirst')}
+          title={
+            !candidatePath
+              ? tr('modelRegistry.titlePromoteNoCandidate')
+              : hasActive ? tr('modelRegistry.titlePromoteOverwrite') : tr('modelRegistry.titlePromoteFirst')
+          }
         >
           {tr('modelRegistry.btnPromote')}
         </button>
@@ -384,6 +404,11 @@ function AlgorithmCard({
           <RotateCcw className="w-3 h-3" />
           {tr('modelRegistry.btnRollback')}
         </button>
+        {candidatePath && (
+          <span className="text-xs text-emerald-300/80 font-mono ml-1 truncate" title={candidatePath}>
+            {tr('modelRegistry.candidateReady')}: {candidatePath.split('/').pop()}
+          </span>
+        )}
         {actionError && (
           <span className="text-xs text-red-400 font-mono ml-2 truncate" title={actionError}>
             {actionError}
@@ -421,9 +446,18 @@ function AlgorithmCard({
         message={
           <div className="space-y-2">
             <p>{tr('modelRegistry.confirmRollbackBody')}</p>
-            <p className="text-xs text-gray-400">
-              {tr('modelRegistry.confirmRollbackCurrentLabel')}: <span className="font-mono text-gray-300">{activeState?.active_weights_path || tr('modelRegistry.none')}</span>
-            </p>
+            <div className="text-xs text-gray-400 space-y-1.5">
+              <div>
+                <div>{tr('modelRegistry.confirmRollbackCurrentLabel')}: <span className="font-mono text-gray-300">{activeState?.active_weights_path?.split('/').pop() || tr('modelRegistry.none')}</span></div>
+                {activeState?.note && <div className="text-gray-500 pl-2">{activeState.note}</div>}
+              </div>
+              <div>
+                <div>{tr('modelRegistry.confirmRollbackPrevLabel')}: <span className="font-mono text-amber-200">{activeState?.history?.[activeState.history.length - 1]?.weights_path?.split('/').pop() || tr('modelRegistry.none')}</span></div>
+                {activeState?.history?.[activeState.history.length - 1]?.note && (
+                  <div className="text-gray-500 pl-2">{activeState.history[activeState.history.length - 1].note}</div>
+                )}
+              </div>
+            </div>
             {actionError && (
               <div className="mt-2 px-2.5 py-2 bg-red-900/30 border border-red-500/50 rounded text-xs text-red-300 font-mono break-words">
                 {actionError}
@@ -477,7 +511,7 @@ export function ModelRegistry() {
   const [applications, setApplications] = useState<VisionTankApplication[]>([]);
   const [libraryVersion, setLibraryVersion] = useState<number | null>(null);
   const [states, setStates] = useState<Record<string, VisionAlgorithmActiveState>>({});
-  const [training, setTraining] = useState<VisionTrainingStatus | null>(null);
+  const [trainingByAlgo, setTrainingByAlgo] = useState<Record<string, VisionTrainingStatus | null>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
@@ -485,28 +519,27 @@ export function ModelRegistry() {
   const load = useCallback(async (silent: boolean) => {
     if (!silent) setLoading(true);
     try {
-      const [algoRes, appRes, trainRes] = await Promise.all([
+      const [algoRes, appRes] = await Promise.all([
         Vision.algorithms(),
         Vision.tankApplications(),
-        Vision.trainingStatus().catch(() => null),
       ]);
       setAlgorithms(algoRes.items);
       setLibraryVersion(algoRes.algorithm_library_version);
       setApplications(appRes.items);
-      setTraining(trainRes);
 
-      // 알고리즘별 manifest state 병렬 조회 — 실패 항목은 무시 (zero state 유지).
-      const stateEntries = await Promise.all(
+      // 알고리즘별 manifest state + 학습 게이트 병렬 조회 — 실패 항목은 무시 (zero state 유지).
+      // 카드마다 자기 게이트를 보여야 [학습 시작] 활성화가 데이터 수집 상태와 일치한다.
+      const entries = await Promise.all(
         algoRes.items.map(async (a) => {
-          try {
-            const st = await Vision.algorithmState(a.vision_algorithm_id);
-            return [a.vision_algorithm_id, st] as const;
-          } catch {
-            return [a.vision_algorithm_id, { active_weights_path: '' }] as const;
-          }
+          const [st, tr] = await Promise.all([
+            Vision.algorithmState(a.vision_algorithm_id).catch(() => ({ active_weights_path: '' })),
+            Vision.trainingStatus(a.vision_algorithm_id).catch(() => null),
+          ]);
+          return [a.vision_algorithm_id, st, tr] as const;
         }),
       );
-      setStates(Object.fromEntries(stateEntries));
+      setStates(Object.fromEntries(entries.map(([id, st]) => [id, st])));
+      setTrainingByAlgo(Object.fromEntries(entries.map(([id, , tr]) => [id, tr])));
       setLastLoadedAt(new Date().toISOString());
       setError(null);
     } catch (err) {
@@ -577,7 +610,7 @@ export function ModelRegistry() {
                 algo={algo}
                 applications={applications}
                 activeState={states[algo.vision_algorithm_id] ?? null}
-                training={training}
+                training={trainingByAlgo[algo.vision_algorithm_id] ?? null}
                 onPromoted={() => void load(true)}
                 onRolledBack={() => void load(true)}
               />

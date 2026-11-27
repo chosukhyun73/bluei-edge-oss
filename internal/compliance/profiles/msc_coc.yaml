@@ -1,0 +1,13 @@
+id: msc_coc
+name: MSC CoC
+version: v5.1
+checked_at: "2026-11-17"
+min_retention_years: 3
+items:
+  - {id: cert, title: 유효한 MSC CoC 인증서를 등록했다, required: true, check: "cert_own:msc_coc"}
+  - {id: retention, title: 기록을 3년 이상 보관한다, clause: "5.1.3", required: true, check: retention}
+  - {id: supplier, title: 인증 공급자의 인증서를 원장에 등록하고 확인 일자를 적는다, required: true, check: manual}
+  - {id: segregation, title: 인증품 식별·분리 기록, required: true, check: later}
+  - {id: yield, title: 배치·기간별 전환율(수율) 계산, clause: "4.5", required: true, check: later}
+  - {id: change_log, title: 기록 변경 시 날짜와 변경자, clause: "4.3.1", required: true, check: later}
+  - {id: nonconforming, title: 부적합품 통보(심사기관 2일·고객 4일), clause: "5.4.1", required: true, check: later}

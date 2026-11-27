@@ -89,6 +89,24 @@ func (s *Service) loop(ctx context.Context) {
 	dailyTick := time.NewTicker(1 * time.Minute)
 	defer dailyTick.Stop()
 
+	// Periodic outbound sync — keeps app.bluei.kr showing near-current GX10 state
+	// without waiting for the daily cron. First run ~30s after boot, then every
+	// SyncIntervalMin. Only backend-supported events are queued (createBatch), so
+	// each run is a small, dense batch. Disabled when SyncIntervalMin <= 0.
+	periodicEnabled := s.cfg.SyncIntervalMin > 0
+	var periodicTick *time.Ticker
+	var periodicC <-chan time.Time
+	initialSync := time.NewTimer(30 * time.Second)
+	defer initialSync.Stop()
+	if periodicEnabled {
+		periodicTick = time.NewTicker(time.Duration(s.cfg.SyncIntervalMin) * time.Minute)
+		defer periodicTick.Stop()
+		periodicC = periodicTick.C
+		slog.Info("sync periodic outbound configured", "interval_min", s.cfg.SyncIntervalMin)
+	} else {
+		initialSync.Stop()
+	}
+
 	dailyHour, dailyMin, dailyEnabled := parseDailyTimeKST(s.cfg.DailyCronKST)
 	if dailyEnabled {
 		slog.Info("sync daily cron configured", "kst_time", s.cfg.DailyCronKST)
@@ -108,6 +126,10 @@ func (s *Service) loop(ctx context.Context) {
 			s.pullTankDeltas(ctx)
 		case <-pullTick.C:
 			s.pullTankDeltas(ctx)
+		case <-initialSync.C:
+			s.runPeriodicSync(ctx)
+		case <-periodicC:
+			s.runPeriodicSync(ctx)
 		case <-dailyTick.C:
 			if !dailyEnabled {
 				continue
@@ -127,6 +149,44 @@ func (s *Service) retryQueue(ctx context.Context) {
 	if s.cfg.Endpoint != nil && *s.cfg.Endpoint != "" {
 		if err := s.sendPending(ctx); err != nil {
 			slog.Warn("sync retry failed", "error", err)
+		}
+	}
+	s.app.Health.Touch("sync")
+}
+
+// runPeriodicSync creates and pushes batches of backend-supported events so the
+// platform stays current. It drains up to maxBatchesPerRun batches per tick to
+// absorb short bursts without letting the queue grow; steady-state volume is
+// small (createBatch queues only supported types).
+func (s *Service) runPeriodicSync(ctx context.Context) {
+	if s.cfg.Endpoint == nil || *s.cfg.Endpoint == "" {
+		return
+	}
+	// Collapse redundant env readings first — the backend buckets to 30-min slots,
+	// so only the latest reading per tank+metric matters. This keeps each sync a
+	// small snapshot the slow per-event backend can actually absorb.
+	if n, err := s.store.CollapseRedundantReadings(ctx); err != nil {
+		slog.Warn("collapse redundant readings failed", "error", err)
+	} else if n > 0 {
+		slog.Info("collapsed redundant env readings", "count", n)
+	}
+	const maxBatchesPerRun = 20
+	for i := 0; i < maxBatchesPerRun; i++ {
+		if err := createBatch(ctx, s.app, s.store, s.cfg.BatchSize); err != nil {
+			slog.Warn("periodic sync batch creation failed", "error", err)
+			return
+		}
+		pending, err := s.store.GetPendingSyncBatch(ctx)
+		if err != nil {
+			slog.Warn("periodic sync pending lookup failed", "error", err)
+			return
+		}
+		if pending == nil {
+			return // nothing left to send
+		}
+		if err := s.sendPending(ctx); err != nil {
+			slog.Warn("periodic sync send failed", "error", err)
+			return
 		}
 	}
 	s.app.Health.Touch("sync")

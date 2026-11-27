@@ -298,6 +298,15 @@ func (s *Server) handleCreateSiteHarvest(w http.ResponseWriter, r *http.Request)
 		line := events.SiteHarvestLine{
 			TankID: l.TankID, LotNo: l.LotNo, Count: l.Count, AvgWeightG: l.AvgWeightG, FullClose: l.FullClose,
 		}
+		if !l.FullClose {
+			// 부분 출하: 활성 입식에 귀속해 마릿수 집계(SumTankCountAdjustment)에서 차감되게 한다.
+			if lc, err := s.store.GetTankLifecycle(r.Context(), l.TankID); err == nil && lc != nil && lc.Status == "active" {
+				line.StockingID = lc.ActiveStockingID
+				if line.LotNo == "" {
+					line.LotNo = lc.LotNo
+				}
+			}
+		}
 		if l.FullClose {
 			harvestID, noActive, err := s.createTankHarvest(r.Context(), l.TankID, tankHarvestParams{
 				HarvestedCount: l.Count,
@@ -343,6 +352,12 @@ func (s *Server) handleCreateSiteHarvest(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "EVENT_APPEND_FAILED", err.Error(), "")
 		return
+	}
+
+	for _, l := range lines {
+		if l.StockingID != "" {
+			s.applyFishCountToProfile(r.Context(), l.TankID)
+		}
 	}
 
 	linesJSON, _ := json.Marshal(lines)

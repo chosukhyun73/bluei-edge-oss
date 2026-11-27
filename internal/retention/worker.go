@@ -26,8 +26,8 @@ import (
 // eventArchiver is the narrow slice of storage.Store the worker needs.
 // storage.Store satisfies it; tests use a small fake.
 type eventArchiver interface {
-	SelectEventsOlderThan(ctx context.Context, eventType string, cutoff time.Time, limit int) ([]storage.ArchivableEvent, error)
-	DeleteEventsOlderThanUpToSeq(ctx context.Context, eventType string, cutoff time.Time, maxSeq int64) (int64, error)
+	SelectEventsOlderThan(ctx context.Context, eventType string, filter storage.MetricFilter, cutoff time.Time, limit int) ([]storage.ArchivableEvent, error)
+	DeleteEventsOlderThanUpToSeq(ctx context.Context, eventType string, filter storage.MetricFilter, cutoff time.Time, maxSeq int64) (int64, error)
 }
 
 // dailyAggregator emits a per-day min/max/avg summary for raw readings recorded
@@ -43,7 +43,13 @@ type Rule struct {
 	KeepDays  int
 	// AggregateDaily — true 면 prune 전에 일별 요약(min/max/avg)을 남긴다.
 	// cutoff 도 rolling 이 아닌 로컬 달력일 경계로 정렬되어, 최근 24~48h raw 는 보존된다.
+	// 요약 자체는 metric 필터와 무관하게 전 metric 대상이며 멱등이라, 필터가 다른
+	// 룰이 각각 요약을 호출해도 중복 없이 안전하다.
 	AggregateDaily bool
+	// Metrics / ExcludeMetrics — payload metric 값으로 룰 적용 범위를 좁힌다.
+	// 같은 event_type 에 보관기간이 다른 룰을 둘 때(예: 수온만 장기 보존) 사용.
+	Metrics        []string
+	ExcludeMetrics []string
 }
 
 // Config controls the retention worker.
@@ -199,7 +205,8 @@ func (w *Worker) tick(ctx context.Context) {
 			cutoff = now.AddDate(0, 0, -r.KeepDays)
 		}
 
-		n, err := w.archiveAndPrune(ctx, r.EventType, cutoff)
+		filter := storage.MetricFilter{Include: r.Metrics, Exclude: r.ExcludeMetrics}
+		n, err := w.archiveAndPrune(ctx, r.EventType, filter, cutoff)
 		if err != nil {
 			w.log.Warn("retention: archive/prune failed",
 				"event_type", r.EventType, "error", err)
@@ -209,6 +216,7 @@ func (w *Worker) tick(ctx context.Context) {
 			w.log.Info("retention: archived+pruned",
 				"event_type", r.EventType, "keep_days", r.KeepDays,
 				"aggregate_daily", r.AggregateDaily,
+				"metrics", r.Metrics, "exclude_metrics", r.ExcludeMetrics,
 				"cutoff", cutoff.Format(time.RFC3339), "rows", n)
 		}
 	}
@@ -218,13 +226,13 @@ func (w *Worker) tick(ctx context.Context) {
 // cutoff, batching to bound memory. Each batch is fully archived (fsync) before
 // its rows are deleted, so a crash mid-run never loses data — at worst a batch
 // is re-archived (harmless duplicate) on the next run.
-func (w *Worker) archiveAndPrune(ctx context.Context, eventType string, cutoff time.Time) (int64, error) {
+func (w *Worker) archiveAndPrune(ctx context.Context, eventType string, filter storage.MetricFilter, cutoff time.Time) (int64, error) {
 	var total int64
 	for {
 		if ctx.Err() != nil {
 			return total, ctx.Err()
 		}
-		batch, err := w.store.SelectEventsOlderThan(ctx, eventType, cutoff, w.cfg.BatchSize)
+		batch, err := w.store.SelectEventsOlderThan(ctx, eventType, filter, cutoff, w.cfg.BatchSize)
 		if err != nil {
 			return total, fmt.Errorf("select: %w", err)
 		}
@@ -235,7 +243,7 @@ func (w *Worker) archiveAndPrune(ctx context.Context, eventType string, cutoff t
 			return total, fmt.Errorf("archive: %w", err)
 		}
 		maxSeq := batch[len(batch)-1].Sequence
-		deleted, err := w.store.DeleteEventsOlderThanUpToSeq(ctx, eventType, cutoff, maxSeq)
+		deleted, err := w.store.DeleteEventsOlderThanUpToSeq(ctx, eventType, filter, cutoff, maxSeq)
 		if err != nil {
 			return total, fmt.Errorf("delete: %w", err)
 		}

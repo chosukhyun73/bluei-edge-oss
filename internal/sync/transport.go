@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"bluei.kr/edge/internal/config"
 )
 
 // GX10SyncBatchResponse mirrors the backend ACK schema returned by
@@ -21,6 +23,18 @@ type GX10SyncBatchResponse struct {
 	Ignored   int      `json:"ignored"`
 	Errors    []string `json:"errors"`
 	NodeCode  string   `json:"node_code,omitempty"`
+}
+
+// PostEnvelope sends an envelope to the backend using only sync config (no
+// store/app wiring). Used by the synccheck verification harness to exercise the
+// exact outbound path — transform → POST → ACK — against the live backend.
+func PostEnvelope(ctx context.Context, cfg *config.SyncConfig, envelope *BatchEnvelope) (*GX10SyncBatchResponse, error) {
+	timeout := time.Duration(cfg.HTTPTimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	s := &Service{cfg: cfg, httpClient: &http.Client{Timeout: timeout}}
+	return s.postEnvelope(ctx, envelope)
 }
 
 // postEnvelope sends the batch envelope to the configured backend endpoint

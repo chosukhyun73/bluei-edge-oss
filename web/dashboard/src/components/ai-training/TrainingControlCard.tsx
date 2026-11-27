@@ -3,7 +3,7 @@ import { Vision } from '../../lib/api';
 import type { VisionTrainingStatus } from '../../lib/types';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { ConfirmDialog } from '../ui/confirm-dialog';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 /**
  * 5/9 ai-training.html 의 "가르치기" 카드 — startTraining + cancelTraining + 진행률.

@@ -1,0 +1,13 @@
+id: kr_haccp
+name: 한국 HACCP (식약처)
+version: 식약처 고시 제2026-60호
+checked_at: "2026-11-17"
+min_retention_years: 2
+items:
+  - {id: plan, title: HACCP 관리계획(공정흐름도·위해분석·CCP)을 게시했다, required: true, check: plan_published}
+  - {id: cert, title: HACCP 인증번호 또는 인증서를 등록했다, required: false, check: haccp_cert, note: 인증 전이면 비워 둔다}
+  - {id: retention, title: 기록을 2년 이상 보관한다, clause: 고시 제8조, required: true, check: retention}
+  - {id: review, title: 기록을 검토·서명할 계정이 있다, clause: 고시 제8조, required: true, check: reviewer_account}
+  - {id: smart, title: 모든 CCP 에 자동으로 기록되는 한계기준 항목이 있다, clause: 고시 제11조의2·별표 4의2, required: false, check: ccp_auto, note: 스마트해썹 등록을 신청할 때만 필요}
+  - {id: monitoring, title: CCP 모니터링·이탈·개선조치 기록, required: true, check: later}
+  - {id: change, title: CCP 나 소재지가 바뀌면 변경신청을 한다, clause: 고시 제12조, required: true, check: manual, note: 게시 때 CCP 변경 여부를 표시한다. 신청은 공장이 한다}

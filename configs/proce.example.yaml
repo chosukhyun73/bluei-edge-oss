@@ -1,0 +1,30 @@
+# processing-bluei — 가공공장 관리 서비스 설정 예시.
+# 공장 정보·구역·센서·HACCP 계획은 여기가 아니라 앱 화면에서 등록한다.
+
+site:
+  site_id: plant_dev_001      # 이 기기가 담당하는 현장 식별자
+  name: 가공공장
+  site_type: processing
+  timezone: Asia/Seoul
+
+edge:
+  edge_id: proce_dev_001
+  mode: development
+  data_dir: ./var/processing-bluei
+
+runtime:
+  startup_timeout_sec: 30
+  shutdown_timeout_sec: 10
+
+api:
+  bind_host: 127.0.0.1        # 같은 LAN 에서 쓰려면 0.0.0.0 + auth.enabled: true
+  port: 8080
+  request_timeout_sec: 30
+  auth:
+    enabled: false
+    operator_token_env: PROCESSING_BLUEI_OPERATOR_TOKEN
+
+storage:
+  driver: sqlite
+  sqlite_path: ./var/processing-bluei/proce.db
+  migration_mode: auto

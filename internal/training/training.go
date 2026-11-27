@@ -57,6 +57,10 @@ type Job struct {
 
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
+	// 최근 subprocess 출력 꼬리 (비프로토콜 라인 포함) — 실패 시 Error 에 병합.
+	// 2026-07-08: traceback 이 어디에도 안 남아 "exit status 1" 만으로 원인
+	// 추적이 불가능했던 문제의 재발 방지.
+	tailLines []string
 }
 
 // StartOptions specifies what kind of training job to launch.
@@ -260,8 +264,17 @@ func (s *Service) Cancel(ctx context.Context) error {
 func (s *Service) scan(r io.Reader, job *Job) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 4096), 1024*1024)
+	const tailCap = 15
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
+		if line != "" {
+			s.mu.Lock()
+			job.tailLines = append(job.tailLines, line)
+			if len(job.tailLines) > tailCap {
+				job.tailLines = job.tailLines[len(job.tailLines)-tailCap:]
+			}
+			s.mu.Unlock()
+		}
 		if strings.HasPrefix(line, "PROGRESS ") {
 			parts := strings.SplitN(strings.TrimPrefix(line, "PROGRESS "), " ", 2)
 			if len(parts) >= 1 {
@@ -298,6 +311,7 @@ func (s *Service) scan(r io.Reader, job *Job) {
 
 // wait blocks on the subprocess and finalizes job state.
 func (s *Service) wait(ctx context.Context, job *Job) {
+	_ = ctx // job ctx 는 아래에서 cancel 되므로 최종 이벤트 적재에 쓰면 안 됨
 	err := job.cmd.Wait()
 	if job.cancel != nil {
 		job.cancel()
@@ -310,6 +324,9 @@ func (s *Service) wait(ctx context.Context, job *Job) {
 	if err != nil {
 		job.Status = "failed"
 		job.Error = err.Error()
+		if len(job.tailLines) > 0 {
+			job.Error += "\n--- 마지막 출력 ---\n" + strings.Join(job.tailLines, "\n")
+		}
 		job.StageLabel = "학습 실패"
 	} else {
 		job.Status = "completed"
@@ -319,7 +336,10 @@ func (s *Service) wait(ctx context.Context, job *Job) {
 	}
 	job.UpdatedAt = time.Now().UTC()
 	s.mu.Unlock()
-	s.appendEvent(ctx, job)
+	// 최종 상태(completed/failed) 이벤트는 job ctx 가 아니라 Background 로 적재한다.
+	// job.cancel() 이 먼저 실행돼 canceled ctx 로는 조용히 유실됨 — 실측: completed
+	// 이벤트 0건으로 promote 후보 탐색이 원천 불가였다 (2026-07-18 규명).
+	s.appendEvent(context.Background(), job)
 }
 
 func (s *Service) markFailed(job *Job, msg string) {

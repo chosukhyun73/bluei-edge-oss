@@ -10,7 +10,8 @@
 // 10초 폴링. site_id 변경 시 reset.
 
 import { useEffect, useRef, useState } from 'react';
-import { useLanguage } from '../../lib/language-context';
+import { dateLocale } from '../../lib/format';
+import { useLanguage } from '../../lib/language-core';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
@@ -82,7 +83,7 @@ function fmtNum(v?: number | null, digits = 1): string {
 function fmtTime(iso?: string): string {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString('ko-KR', {
+    return new Date(iso).toLocaleString(dateLocale(), {
       month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', second: '2-digit',
     });
@@ -213,7 +214,7 @@ function buildChartData(items: EnvironmentalSnapshot[]): ChartPoint[] {
     const d = new Date(snap.recorded_at);
     return {
       ts: d.getTime(),
-      time: d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+      time: d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' }),
       wind: snap.wind_speed_ms ?? null,
       wave: snap.wave_height_m ?? null,
     };

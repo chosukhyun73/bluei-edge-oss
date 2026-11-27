@@ -41,6 +41,9 @@ func (s *Service) Start(ctx context.Context) error {
 		case "mock_feeder":
 			adapter := NewMockFeederAdapter(s.app, adCfg, s.devices)
 			s.startAdapter(ctx, adapter)
+		case "onoff_feeder":
+			adapter := NewOnoffFeederAdapter(s.app, adCfg, s.devices)
+			s.startAdapter(ctx, adapter)
 		default:
 			slog.Warn("unknown collector adapter type", "type", adCfg.Type, "id", adCfg.ID)
 		}

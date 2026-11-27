@@ -18,8 +18,8 @@ const tankDeltasCursorKey = "sync.tank_deltas.cursor"
 // inboundTankDelta mirrors backend schema GX10TankDelta (one tank_inventory_ledger
 // row: a platform-originated stock reduction such as a confirmed sale).
 type inboundTankDelta struct {
-	ID             string   `json:"id"`             // ledger row id — idempotent dedup key
-	GX10TankID     string   `json:"gx10_tank_id"`   // local tank id (resolved by reverse binding)
+	ID             string   `json:"id"`           // ledger row id — idempotent dedup key
+	GX10TankID     string   `json:"gx10_tank_id"` // local tank id (resolved by reverse binding)
 	PlatformTankID string   `json:"platform_tank_id"`
 	EventType      string   `json:"event_type"` // e.g. TRADE_SOLD — NOT echoed back UP
 	DeltaQtyKg     *float64 `json:"delta_qty_kg"`

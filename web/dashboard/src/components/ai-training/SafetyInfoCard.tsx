@@ -1,5 +1,5 @@
 import { Card, CardContent } from '../ui/card';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 /**
  * 5/9 ai-training.html 마지막 섹션 — 안전 안내 (항상 노출).

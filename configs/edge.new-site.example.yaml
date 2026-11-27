@@ -1,0 +1,231 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  bluei-edge — 신규 현장 설치 설정 템플릿
+# ═══════════════════════════════════════════════════════════════════════════
+#
+#  이 파일을 채워 신규 GX10 의 /etc/bluei-edge/edge.yaml 로 저장한다.
+#  (install.sh 가 최초 설치 시 이 템플릿을 그 경로로 자동 복사한다.)
+#
+#  "⇐ 현장값" 표시 필드를 현장에 맞게 바꾼다. 그 외는 그대로 두어도 안전.
+#  채우기 전에도 서비스는 **관찰(read-only) 모드**로 가동한다 —
+#  실장치 제어(급이·냉각기)는 아래에서 명시적으로 켜기 전까지 하지 않는다.
+#  이 원칙이 "틀만 이식, 지능·제어는 현장에서 순차 활성" 을 보장한다.
+#
+#  설치 순서:
+#   1) 이 파일의 ⇐ 현장값 채우기 (site/edge id, 외부 장비 ext_id·센서, 카메라)
+#   2) 카메라·수조 등 상세는 참조된 configs/*.example.yaml 을 현장값으로 편집
+#   3) 외부 장비 API 키는 /etc/bluei-edge/env 에 ONOFF_FEEDER_ACCESS_KEY/SECRET_KEY 주입
+#   4) 대시보드에서 현장 관찰 확인 → 장치 실작동을 단계적으로 켜기(아래 주석 참조)
+# ═══════════════════════════════════════════════════════════════════════════
+
+site:
+  site_id: CHANGE_ME_SITE_ID        # ⇐ 현장값 (예: gangneung_ras_01) — 이벤트·동기화 식별자
+  name: 신규 양식장                  # ⇐ 현장값 (표시 이름)
+  site_type: land_based_ras         # land_based_ras | marine_cage
+  timezone: Asia/Seoul
+
+edge:
+  edge_id: CHANGE_ME_EDGE_ID        # ⇐ 현장값 (예: edge_gng_01) — 이 GX10 장비 식별자
+  mode: production                  # production | development
+  data_dir: /var/lib/bluei-edge     # 런타임 데이터(sqlite·캡처·학습). install.sh 가 생성.
+
+runtime:
+  startup_timeout_sec: 30
+  shutdown_timeout_sec: 10
+  clock_skew_warning_sec: 300
+
+api:
+  bind_host: 127.0.0.1              # 대시보드/데스크탑앱이 원격이면 0.0.0.0 + auth.enabled: true
+  port: 8080
+  request_timeout_sec: 30
+  auth:
+    enabled: false                  # bind_host 가 loopback 아니면 반드시 true
+    operator_token_env: BLUEI_EDGE_OPERATOR_TOKEN
+
+storage:
+  driver: sqlite
+  sqlite_path: /var/lib/bluei-edge/edge.db
+  migration_mode: auto
+
+# 텔레메트리 보관기간 — 만료분은 archive/ 로 백업 후 live DB 에서 제거 (백업 삭제는 운영자).
+retention:
+  enabled: true
+  interval_sec: 86400
+  initial_delay_sec: 120
+  archive_dir: ""
+  rules:
+    - event_type: sensor.reading.recorded
+      metrics: [water_temperature]
+      keep_days: 365
+      aggregate_daily: true
+    - event_type: sensor.reading.recorded
+      exclude_metrics: [water_temperature]
+      keep_days: 1
+      aggregate_daily: true
+    - event_type: device.health.updated
+      keep_days: 1
+    - event_type: vision.agitation.baseline.recorded
+      keep_days: 90
+
+# ── 도메인 구성 파일 — 각 configs/*.example.yaml 을 현장값으로 편집 후 참조 ──
+# (tanks.config_path 는 필수. 나머지는 현장에 해당 요소가 있을 때 채운다.)
+tanks:
+  config_path: ./configs/tanks.example.yaml           # ⇐ 현장 수조 목록으로 편집
+groups:
+  config_path: ""
+devices:
+  config_path: ""
+farms:
+  config_path: ""
+sites_land:
+  config_path: ""
+sites_marine:
+  config_path: ""
+water_treatment_groups:
+  config_path: ""
+actuators:
+  config_path: ""
+sensors:
+  config_path: ""
+controllers:
+  config_path: ""
+species_profiles:
+  config_path: ./configs/species_profiles.example.yaml # ⇐ 현장 어종 급이·수질 모델 (수온/급이 기본값 근거)
+cameras:
+  config_path: ./configs/cameras.example.yaml          # ⇐ 현장 카메라 RTSP host/경로/수조매핑으로 편집
+logging:
+  config_path: ""
+
+# ── 수질 수집 (외부 장비 API) ──
+# 키는 /etc/bluei-edge/env 의 ONOFF_FEEDER_ACCESS_KEY / ONOFF_FEEDER_SECRET_KEY 로 주입.
+# ext/sensor id 는 현장 외부 장비 패널에서 확인. 미설정(빈/0) 이면 해당 수집은 비활성.
+collector:
+  enabled: true
+  adapters:
+
+rules:
+  enabled: true
+  config_path: ""
+
+# ── 실장치 제어 — 신규 현장은 자동 명령 OFF 로 시작. 현장 검증 후 켠다. ──
+control:
+  enabled: true
+  automatic_commands_enabled: false # ⇐ 관찰 검증 후 true. false = 명령 발행 안 함(안전).
+  require_idempotency_key: true
+  default_command_ttl_sec: 60
+  adapters:
+    - id: mock-control-01
+      type: mock_control
+      timeout_sec: 5
+
+# 플랫폼(bluei.kr) 동기화 — 앱 [GX10 연결]에서 발급한 node_code/token 채운 뒤 활성.
+sync:
+  enabled: false                    # ⇐ node_code/access_token 채운 뒤 true
+  mode: offline_queue
+  endpoint: "https://api.bluei.kr/gx10/sync/batches"
+  node_code: ""                     # ⇐ 현장값 (앱 등록)
+  access_token: ""                  # ⇐ 현장값 (앱 발급 1회 표시)
+  daily_cron_kst: "12:37"
+  sync_interval_min: 30
+  batch_size: 10
+  http_timeout_sec: 90
+  retry:
+    min_backoff_sec: 30
+    max_backoff_sec: 900
+
+# 로컬 비전 추론(LRCN) — Python 서버(8081) + 모델 준비 후 활성 (Phase 2 환경구성).
+inference:
+  enabled: false
+  mode: disabled
+  ollama:
+    endpoint: http://127.0.0.1:11435
+    model: gemma4:26b
+    timeout_sec: 30
+  lrcn:
+    enabled: false                  # ⇐ 8081 LRCN 서버·venv 준비 후 true
+    endpoint: http://127.0.0.1:8081
+    timeout_sec: 60
+
+baseline_worker:
+  enabled: false
+
+decision_policy:
+  auto_execute_enabled: false
+  grace_minutes: 10
+
+weight_history_worker:
+  enabled: true
+  interval_sec: 3600
+  initial_delay_sec: 30
+
+predictive_safety:
+  enabled: false
+  nh3_caution_ratio: 0.7
+
+# ── 급이 사이클 ──
+# feeder 타이밍(spinup/run/stop)·배출률은 강릉 외부 장비 급이기 실측값. 현장 급이기가
+# 다르면 대시보드 시운전으로 보정한다. onoff_feeder_live_tanks 가 실작동 스위치:
+# 빈 목록 = 전 수조 dry-run(추정만, 실 급이 안 함). 현장 시운전 확인 후 수조를 추가한다.
+feed_cycle:
+  enabled: true
+  default_gap_ms: 60000
+  default_pulse_duration_ms: 5000
+  pulse_dispatch_timeout_sec: 30
+  onoff_feeder_live_tanks: []    # ⇐ 시운전 확인 후 실급이 수조 추가 (예: [tank_01]). 빈 = 전부 dry-run(안전).
+  feeder_spinup_sec: 11             # 공급모터 리드타임(초) — 현장 급이기 실측 보정
+  feeder_run_sec: 3                 # 펄스 공급시간(초)
+  feeder_stop_sec: 6
+  compensation_max_per_cycle: 2
+  compensation_satiation_peak_threshold: 0.30
+  r3_shadow_enabled: false          # r3(LRCN 탑뷰) 섀도 배출판정. RTSP 3연결 검증 후 활성 (2026-07-22)
+  r3_shadow_threshold: 0.5          # feeding_score < 임계 → 무배출. 섀도 전용(보상 미영향)
+
+# ── 학습 영상 캡처 — mode=rtsp 로 현장 카메라 녹화. 신규 현장은 continuous 는
+# 라벨링 데이터 축적을 위해 켜되, 디스크(외장 권장)·카메라 확인 후. ──
+capture:
+  enabled: true
+  mode: rtsp
+  duration_seconds: 9
+  temp_dir: /var/lib/bluei-edge/captures  # 외장 저장소 있으면 그 mount point 로 (예: /mnt/usb-captures)
+  retention_minutes: 60
+  observation_tail_sec: 60
+  continuous: false                 # ⇐ 카메라·디스크 확인 후 true (라벨링 데이터 축적 시작)
+  continuous_tanks: []              # ⇐ 현장값 (예: [tank_01, tank_02])
+  continuous_mode_spacing_seconds: 30
+  max_disk_percent: 80              # 디스크 임계 강제 cleanup (외장 안전망)
+
+schedule:
+  enabled: true
+  interval_sec: 30
+
+# 운영자 어시스턴트 LLM — Ollama + 모델 준비 후 활성 (Phase 2 환경구성).
+llm:
+  enabled: false                    # ⇐ Ollama + gemma 모델 설치 후 true
+  endpoint: http://localhost:11435
+  auth_token: ""                    # 로컬 11435 직결은 비움. 인증 프록시 경유 시에만 토큰
+  primary_model: gemma4:e4b
+  fallback_model: gemma4:26b
+  timeout_sec: 60
+  assistant_model: bluei-edge-assistant
+  assistant_keep_alive: 30m
+
+# ── Arbiter 안전 게이트 — 어체 생존 임계. 현장 어종에 맞게 설정 (아래는 대서양연어). ──
+# 어떤 의도로도 bypass 불가. 현장 어종의 생존 수온/DO 범위로 반드시 조정한다.
+arbiter:
+  safety_gate:
+    enabled: true
+    sensor_max_stale_sec: 300
+    temp_min_c: 4.0                 # ⇐ 현장 어종 생존 하한
+    temp_max_c: 20.0                # ⇐ 현장 어종 생존 상한
+    do_min_mg_l: 5.0                # ⇐ 현장 어종 DO 하한
+
+# 자동 수온 제어 — 냉각기 목표수온 유지. 신규 현장은 dry_run(관찰) 으로 시작.
+temp_control:
+  enabled: true
+  interval_sec: 60
+  min_switch_sec: 600
+  dry_run: true                     # ⇐ 냉각기 ext 설정·검증 후 대시보드 토글로 자동제어
+
+# 외부 연안 수온(NIFS RISA) — 취수 권역 수온 추세 참고(선택). 미설정이면 비활성.
+# 현장 취수 권역 근처 NIFS 관측소 코드를 우선순위 순으로. 참고: bgna3(강릉)·byy87(양양).
+sea_temp:
+  stations: []                      # ⇐ 현장 권역 NIFS 관측소 코드 (없으면 빈 채로 = 비활성)

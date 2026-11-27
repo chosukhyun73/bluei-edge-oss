@@ -20,11 +20,17 @@ import (
 const bootstrapSnapshotDir = "local-ai/training/data/bootstrap/snapshots"
 
 type bootstrapLabelRequest struct {
-	CameraID    string                      `json:"camera_id"`
-	TankID      string                      `json:"tank_id"`
-	SnapshotRef string                      `json:"snapshot_ref"`
-	OperatorID  string                      `json:"operator_id"`
-	Boxes       []events.VisionBootstrapBox `json:"boxes"`
+	CameraID    string `json:"camera_id"`
+	TankID      string `json:"tank_id"`
+	SnapshotRef string `json:"snapshot_ref"`
+	// OriginStillID — 바닥 스틸 라벨링(③ 탭)에서 온 경우 원본 still_id.
+	OriginStillID string `json:"origin_still_id"`
+	// OriginClipID/FrameOffsetSec — 클립 프레임 라벨링(① 탭)의 원본 clip_id 와
+	// 클립 내 시점(초). 학습 풀 라벨 포화 클립 로테이션용.
+	OriginClipID   string                      `json:"origin_clip_id"`
+	FrameOffsetSec float64                     `json:"frame_offset_sec"`
+	OperatorID     string                      `json:"operator_id"`
+	Boxes          []events.VisionBootstrapBox `json:"boxes"`
 	// Image is a data URL ("data:image/jpeg;base64,....") OR plain base64
 	// JPEG bytes captured by the frontend at label time. Optional; when
 	// omitted the label is recorded but cannot be used for YOLO training.
@@ -66,13 +72,16 @@ func (s *Server) handlePostBootstrapLabel(w http.ResponseWriter, r *http.Request
 		snapshotRef = path
 	}
 	payload := events.VisionBootstrapLabelRecordedPayload{
-		LabelID:     labelID,
-		CameraID:    req.CameraID,
-		TankID:      req.TankID,
-		SnapshotRef: snapshotRef,
-		OperatorID:  req.OperatorID,
-		Boxes:       req.Boxes,
-		RecordedAt:  common.FormatTime(common.NowUTC()),
+		LabelID:        labelID,
+		CameraID:       req.CameraID,
+		TankID:         req.TankID,
+		SnapshotRef:    snapshotRef,
+		OriginStillID:  req.OriginStillID,
+		OriginClipID:   req.OriginClipID,
+		FrameOffsetSec: req.FrameOffsetSec,
+		OperatorID:     req.OperatorID,
+		Boxes:          req.Boxes,
+		RecordedAt:     common.FormatTime(common.NowUTC()),
 	}
 	if err := payload.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "INVALID_BOOTSTRAP_LABEL", err.Error(), "")

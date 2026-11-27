@@ -3,7 +3,7 @@ import { Layers, Plus, X, Trash2 } from 'lucide-react';
 import type { Group, NewGroupBody } from '../lib/types';
 import { Groups, ApiError } from '../lib/api';
 import { ConfirmDialog } from './ui/confirm-dialog';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 interface GroupSelectorProps {
   groups: Group[];

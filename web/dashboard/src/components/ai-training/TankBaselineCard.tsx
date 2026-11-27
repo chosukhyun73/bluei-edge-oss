@@ -3,7 +3,7 @@ import { Vision, Tanks } from '../../lib/api';
 import type { VisionTrainingStatus, Tank, StateVector } from '../../lib/types';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { ConfirmDialog } from '../ui/confirm-dialog';
-import { useLanguage } from '../../lib/language-context';
+import { useLanguage } from '../../lib/language-core';
 
 /**
  * 5/9 ai-training.js 의 baseline 학습 카드 — Cage/Tank 별 autoencoder 이상 감지.

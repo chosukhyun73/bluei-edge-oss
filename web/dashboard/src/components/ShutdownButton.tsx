@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Power, AlertTriangle } from 'lucide-react';
 import { System, ApiError } from '../lib/api';
-import { useLanguage } from '../lib/language-context';
+import { useLanguage } from '../lib/language-core';
 
 // 백엔드 안전 종료 버튼 — GX10 전원 끄기 직전 운영자가 graceful 종료시킨다.
 // 흐름: 버튼 → 확인 모달(경고) → System.shutdown() → 종료 완료 화면 → Tauri 창 닫기 시도.
